@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudoku Master - Real Final Fix</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            margin: 0;
+            padding: 20px 10px;
+            box-sizing: border-box;
+            min-height: 100vh;
+            user-select: none;
+        }
+        
+        h1 {
+            color: #1a252f;
+            margin: 0 0 10px 0;
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: 1px;
+        }
+
+        .status-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .status-card {
+            background: #ffffff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            font-size: 14px;
+            font-weight: 600;
+            color: #576574;
+            border: 1px solid #e2e8f0;
+        }
+
+        .status-card.danger { color: #e74c3c; background: #fdedec; border-color: #fadbd8; }
+        .status-card.warning { color: #d35400; background: #fef5e7; border-color: #fdebd0; }
+
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            width: 100%;
+            max-width: 415px;
+        }
+        
+        select, .btn-action {
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            cursor: pointer;
+            background-color: #ffffff;
+            color: #334155;
+            transition: all 0.2s ease;
+        }
+        
+        select:focus { outline: none; border-color: #3498db; }
+
+        .btn-action:hover {
+            background-color: #3498db;
+            color: white;
+            border-color: #3498db;
+            transform: translateY(-1px);
+        }
+        
+        .btn-hint { background-color: #e67e22; color: white; border-color: #e67e22; }
+        .btn-hint:hover { background-color: #d35400; border-color: #d35400; }
+        .btn-primary { background-color: #2ecc71; color: white; border-color: #2ecc71; }
+        .btn-primary:hover { background-color: #27ae60; border-color: #27ae60; }
+        
+        :root {
+            --cell-size: 46px;
+            --font-size: 20px;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(9, var(--cell-size));
+            grid-template-rows: repeat(9, var(--cell-size));
+            border: 3px solid #1e293b; 
+            background-color: #cbd5e1; 
+            gap: 1px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+        }
+        
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            line-height: var(--cell-size);
+            text-align: center;
+            font-size: var(--font-size);
+            background-color: #ffffff;
+            color: #0f172a;
+            box-sizing: border-box;
+            cursor: pointer;
+            transition: background-color 0.15s ease, color 0.15s ease;
+        }
+        
+        .right-border { border-right: 3px solid #1e293b !important; }
+        .bottom-border { border-bottom: 3px solid #1e293b !important; }
+        
+        .fixed { background-color: #f8fafc; font-weight: 700; color: #64748b; cursor: default; }
+        .selected { background-color: #e0f2fe !important; }
+        .hinted { background-color: #fef9e7 !important; color: #d35400 !important; font-weight: 700; cursor: default; }
+        .incorrect { background-color: #fee2e2 !important; color: #ef4444 !important; font-weight: 600; animation: shake 0.2s ease-in-out 2; }
+        .correct { background-color: #f0fdf4 !important; color: #22c55e !important; font-weight: 600; }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-2px); }
+            75% { transform: translateX(2px); }
+        }
+
+        .keypad {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            width: 100%;
+            max-width: 415px;
+            box-sizing: border-box;
+            padding: 0 5px;
+        }
+
+        .key-btn {
+            background: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 10px;
+            padding: 10px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.03);
+            transition: all 0.2s ease;
+        }
+
+        .key-btn:active, .key-btn:hover {
+            background-color: #e2e8f0;
+            transform: translateY(-1px);
+        }
+
+        .key-num { font-size: 20px; font-weight: 700; color: #1e293b; }
+        .key-count { font-size: 11px; color: #94a3b8; margin-top: 2px; font-weight: 600; }
+
+        .key-btn.completed { background-color: #d1fae5; border-color: #a7f3d0; }
+        .key-btn.completed .key-num { color: #10b981; }
+        .key-btn.completed .key-count { color: #059669; }
+
+        .btn-clear { background-color: #f1f5f9; }
+        .btn-clear .key-num { font-size: 14px; color: #64748b; font-weight: 600;}
+        
+        #message {
+            margin-top: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            height: 30px;
+            color: #334155;
+            text-align: center;
+        }
+
+        @media (max-width: 480px) {
+            :root { 
+                --cell-size: 38px; 
+                --font-size: 18px; 
+            }
+            h1 { font-size: 26px; }
+            select, .btn-action { font-size: 13px; padding: 8px 12px; }
+            .key-num { font-size: 18px; }
+            .key-count { font-size: 10px; }
+            .keypad { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+        }
+
+        @media (max-width: 360px) {
+            :root { 
+                --cell-size: 32px; 
+                --font-size: 16px; 
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Sudoku</h1>
+
+    <div class="status-container">
+        <div class="status-card danger" id="mistakes-display">Mistakes: 0/3</div>
+        <div class="status-card warning" id="hints-display">Hints: 0/3</div>
+    </div>
+    
+    <div class="controls">
+        <select id="difficulty">
+            <option value="30">Easy (Mudah)</option>
+            <option value="45">Medium (Sedang)</option>
+            <option value="55">Hard (Sulit)</option>
+            <option value="64">Extreme (Sangat Sulit)</option>
+        </select>
+        <button class="btn-action" onclick="startGame()">Mulai Baru</button>
+        <button class="btn-action btn-hint" id="hint-button" onclick="giveHint()">Hint</button>
+        <button class="btn-action btn-primary" onclick="checkBoard()">Cek Selesai</button>
+    </div>
+
+    <div id="board"></div>
+
+    <div class="keypad">
+        <div class="key-btn" onclick="pressNumber(1)"><span class="key-num">1</span><span class="key-count" id="count-1">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(2)"><span class="key-num">2</span><span class="key-count" id="count-2">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(3)"><span class="key-num">3</span><span class="key-count" id="count-3">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(4)"><span class="key-num">4</span><span class="key-count" id="count-4">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(5)"><span class="key-num">5</span><span class="key-count" id="count-5">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(6)"><span class="key-num">6</span><span class="key-count" id="count-6">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(7)"><span class="key-num">7</span><span class="key-count" id="count-7">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(8)"><span class="key-num">8</span><span class="key-count" id="count-8">Sisa: 9</span></div>
+        <div class="key-btn" onclick="pressNumber(9)"><span class="key-num">9</span><span class="key-count" id="count-9">Sisa: 9</span></div>
+        <div class="key-btn btn-clear" onclick="pressClear()"><span class="key-num">Hapus</span><span class="key-count">X</span></div>
+    </div>
+
+    <div id="message"></div>
+
+    <script>
+        const N = 9;
+        let solutionBoard = [];
+        let puzzleBoard = []; 
+        let mistakes = 0;
+        const maxMistakes = 3;
+        let hintsUsed = 0;
+        const maxHints = 3;
+        let selectedCell = null;
+        let isGameOver = false;
+
+        window.onload = () => {
+            startGame();
+        };
+
+        function startGame() {
+            document.getElementById("message").innerText = "";
+            mistakes = 0;
+            hintsUsed = 0;
+            isGameOver = false;
+            selectedCell = null;
+            
+            updateMistakesDisplay();
+            updateHintsDisplay();
+            
+            let blanks = parseInt(document.getElementById("difficulty").value);
+            
+            // Generate papan kosong baru
+            solutionBoard = Array.from({length: N}, () => Array(N).fill(0));
+            fillDiagonal();
+            solveSudoku(solutionBoard);
+            
+            // FIX CRITICAL: Melakukan Deep Copy murni supaya data solutionBoard tidak ikut terhapus di memori
+            puzzleBoard = JSON.parse(JSON.stringify(solutionBoard));
+            
+            removeKDigits(puzzleBoard, blanks);
+            
+            renderBoard();
+            updateNumberCounters();
+        }
+
+        function fillDiagonal() {
+            for (let i = 0; i < N; i += 3) {
+                fillBox(i, i);
+            }
+        }
+
+        function fillBox(rowStart, colStart) {
+            let num;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    do {
+                        num = Math.floor(Math.random() * 9) + 1;
+                    } while (!isSafeInBox(rowStart, colStart, num));
+                    solutionBoard[rowStart + i][colStart + j] = num;
+                }
+            }
+        }
+
+        function isSafeInBox(rowStart, colStart, num) {
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    if (solutionBoard[rowStart + i][colStart + j] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        // Digunakan sistem di awal untuk merancang papan
+        function isSafeGeneration(board, row, col, num) {
+            for (let x = 0; x < N; x++) {
+                if (board[row][x] === num || board[x][col] === num) return false;
+            }
+            let startRow = row - row % 3;
+            let startCol = col - col % 3;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    if (board[i + startRow][j + startCol] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        // Aturan validasi dinamis untuk Player / Script Solver
+        function isSafe(board, row, col, num) {
+            for (let x = 0; x < N; x++) {
+                if (x !== col && board[row][x] === num) return false;
+            }
+            for (let x = 0; x < N; x++) {
+                if (x !== row && board[x][col] === num) return false;
+            }
+            let startRow = row - row % 3;
+            let startCol = col - col % 3;
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 3; j++) {
+                    let currR = i + startRow;
+                    let currC = j + startCol;
+                    if ((currR !== row || currC !== col) && board[currR][currC] === num) return false;
+                }
+            }
+            return true;
+        }
+
+        function solveSudoku(board) {
+            for (let row = 0; row < N; row++) {
+                for (let col = 0; col < N; col++) {
+                    if (board[row][col] === 0) {
+                        for (let num = 1; num <= 9; num++) {
+                            if (isSafeGeneration(board, row, col, num)) {
+                                board[row][col] = num;
+                                if (solveSudoku(board)) return true;
+                                board[row][col] = 0;
+                            }
+                        }
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function removeKDigits(board, count) {
+            let attempts = count;
+            while (attempts > 0) {
+                let cellId = Math.floor(Math.random() * (N * N));
+                let i = Math.floor(cellId / N);
+                let j = cellId % N;
+                if (board[i][j] !== 0) {
+                    board[i][j] = 0;
+                    attempts--;
+                }
+            }
+        }
+
+        function renderBoard() {
+            const boardDiv = document.getElementById("board");
+            boardDiv.innerHTML = ""; 
+
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    let cell = document.createElement("div");
+                    cell.className = "cell";
+                    cell.id = `cell-${r}-${c}`;
+                    
+                    if (c === 2 || c === 5) cell.classList.add("right-border");
+                    if (r === 2 || r === 5) cell.classList.add("bottom-border");
+
+                    if (puzzleBoard[r][c] !== 0) {
+                        cell.innerText = puzzleBoard[r][c];
+                        cell.classList.add("fixed");
+                    } else {
+                        cell.innerText = "";
+                        
+                        cell.addEventListener("click", function() {
+                            if (isGameOver || this.classList.contains("fixed") || this.classList.contains("hinted")) return;
+                            
+                            if (selectedCell) selectedCell.classList.remove("selected");
+                            selectedCell = this;
+                            this.classList.add("selected");
+                        });
+                    }
+                    boardDiv.appendChild(cell);
+                }
+            }
+        }
+
+        function pressNumber(num) {
+            if (isGameOver || !selectedCell) return;
+            
+            let idParts = selectedCell.id.split("-");
+            let r = parseInt(idParts[1]);
+            let c = parseInt(idParts[2]);
+
+            selectedCell.classList.remove("incorrect", "correct");
+
+            if (!isSafe(puzzleBoard, r, c, num)) {
+                selectedCell.innerText = num;
+                puzzleBoard[r][c] = num; 
+                mistakes++;
+                updateMistakesDisplay();
+                selectedCell.classList.add("incorrect");
+                if (mistakes >= maxMistakes) {
+                    endGame(false);
+                }
+            } else {
+                selectedCell.innerText = num;
+                selectedCell.classList.add("correct");
+                puzzleBoard[r][c] = num; 
+                selectedCell.classList.remove("selected");
+                selectedCell = null; 
+                
+                checkAutoWin();
+            }
+            updateNumberCounters();
+        }
+
+        function pressClear() {
+            if (isGameOver || !selectedCell) return;
+            
+            let idParts = selectedCell.id.split("-");
+            let r = parseInt(idParts[1]);
+            let c = parseInt(idParts[2]);
+
+            if(selectedCell.classList.contains("hinted") || selectedCell.classList.contains("fixed")) return;
+
+            selectedCell.innerText = "";
+            selectedCell.classList.remove("incorrect", "correct");
+            puzzleBoard[r][c] = 0;
+            updateNumberCounters();
+        }
+
+        function updateNumberCounters() {
+            let counts = Array(10).fill(0);
+            
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    let val = puzzleBoard[r][c];
+                    if (val >= 1 && val <= 9) {
+                        counts[val]++;
+                    }
+                }
+            }
+
+            for (let i = 1; i <= 9; i++) {
+                let remaining = 9 - counts[i];
+                let countEl = document.getElementById(`count-${i}`);
+                if (!countEl) continue;
+                
+                let btnEl = countEl.parentElement;
+
+                if (remaining <= 0) {
+                    countEl.innerText = "Selesai";
+                    btnEl.classList.add("completed");
+                } else {
+                    countEl.innerText = `Sisa: ${remaining}`;
+                    btnEl.classList.remove("completed");
+                }
+            }
+        }
+
+        function updateMistakesDisplay() {
+            document.getElementById("mistakes-display").innerText = `Mistakes: ${mistakes}/${maxMistakes}`;
+        }
+
+        function updateHintsDisplay() {
+            document.getElementById("hints-display").innerText = `Hints: ${hintsUsed}/${maxHints}`;
+            const hintBtn = document.getElementById("hint-button");
+            if (hintsUsed >= maxHints) {
+                hintBtn.style.opacity = "0.4";
+                hintBtn.style.cursor = "not-allowed";
+            } else {
+                hintBtn.style.opacity = "1";
+                hintBtn.style.cursor = "pointer";
+            }
+        }
+
+        function giveHint() {
+            if (isGameOver || hintsUsed >= maxHints) return;
+
+            if (!selectedCell) {
+                alert("Pilih salah satu kotak kosong di papan terlebih dahulu!");
+                return;
+            }
+
+            let idParts = selectedCell.id.split("-");
+            let r = parseInt(idParts[1]);
+            let c = parseInt(idParts[2]);
+
+            selectedCell.innerText = solutionBoard[r][c];
+            puzzleBoard[r][c] = solutionBoard[r][c]; 
+            
+            selectedCell.classList.remove("selected", "incorrect", "correct");
+            selectedCell.classList.add("hinted");
+            selectedCell = null; 
+
+            hintsUsed++;
+            updateHintsDisplay();
+            updateNumberCounters();
+            
+            checkAutoWin();
+        }
+
+        function checkAutoWin() {
+            let isComplete = true;
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    if (puzzleBoard[r][c] === 0) {
+                        isComplete = false;
+                        break;
+                    }
+                }
+            }
+            
+            if (isComplete) {
+                const incorrectCells = document.querySelectorAll(".incorrect");
+                if (incorrectCells.length === 0) {
+                    endGame(true);
+                }
+            }
+        }
+
+        function endGame(isWin) {
+            isGameOver = true;
+            const msg = document.getElementById("message");
+            
+            if (selectedCell) selectedCell.classList.remove("selected");
+
+            if (isWin) {
+                msg.innerText = "Selamat! Kamu berhasil memecahkan Sudoku! 🎉🏆";
+                msg.style.color = "#22c55e";
+            } else {
+                msg.innerText = "Game Over! Jatah salah kamu sudah habis. ❌";
+                msg.style.color = "#ef4444";
+            }
+        }
+
+        function checkBoard() {
+            if (isGameOver) return;
+            
+            let isComplete = true;
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    if (puzzleBoard[r][c] === 0) {
+                        isComplete = false;
+                        break;
+                    }
+                }
+            }
+
+            const incorrectCells = document.querySelectorAll(".incorrect");
+
+            if (!isComplete || incorrectCells.length > 0) {
+                document.getElementById("message").innerText = "Masih ada kotak kosong atau jawaban salah!";
+                document.getElementById("message").style.color = "#ef4444";
+            } else {
+                endGame(true);
+            }
+        }
+    </script>
+</body>
+</html>
