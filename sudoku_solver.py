@@ -1,3 +1,4 @@
+#sodok rodok
 def print_board(board):
     """Fungsi untuk menampilkan papan Sudoku ke layar dengan rapi"""
     for i in range(len(board)):
