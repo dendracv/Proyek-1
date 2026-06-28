@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>🖐️ AR Hand Text • Buka Tangan</title>
+    <style>
+        :root {
+            --bg: #0a0a14;
+            --primary: #00ffc8;
+            --secondary: #7b2fff;
+            --accent: #ff3cac;
+            --text: #ffffff;
+            --glass: rgba(15, 15, 35, 0.7);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            position: fixed;
+            touch-action: none;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Video Background */
+        #video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            /* Mirror effect seperti kaca */
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            transform: scaleX(-1);
+            /* Mirror juga canvas overlay */
+        }
+
+        /* UI Overlay */
+        #ui {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+        }
+
+        /* Status Indicator */
+        #status-bar {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .status-pill {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 50px;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.4s ease;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            box-shadow: 0 0 15px #ff4444;
+            transition: all 0.4s ease;
+        }
+
+        .status-dot.active {
+            background: var(--primary);
+            box-shadow: 0 0 20px var(--primary);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%,
+            100% {
+                box-shadow: 0 0 15px var(--primary);
+            }
+            50% {
+                box-shadow: 0 0 30px var(--primary), 0 0 60px rgba(0, 255, 200, 0.5);
+            }
+        }
+
+        .status-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.95rem;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+        }
+
+        /* Gesture Hint */
+        #gesture-hint {
+            position: absolute;
+            bottom: 40px;
+            width: 100%;
+            text-align: center;
+            transition: all 0.5s ease;
+        }
+
+        .hint-box {
+            display: inline-block;
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            padding: 16px 28px;
+            text-align: center;
+        }
+
+        .hint-emoji {
+            font-size: 2.5rem;
+            display: block;
+            margin-bottom: 6px;
+            animation: bounce 1.5s ease-in-out infinite;
+        }
+
+        @keyframes bounce {
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+
+        .hint-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9rem;
+            letter-spacing: 0.03em;
+        }
+
+        .hint-text span {
+            color: var(--primary);
+            font-weight: 700;
+        }
+
+        /* Custom Text Input */
+        #text-input-container {
+            position: absolute;
+            top: 100px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 20;
+        }
+
+        #text-input {
+            background: var(--glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 30px;
+            padding: 12px 20px;
+            font-size: 1rem;
+            color: white;
+            text-align: center;
+            width: 220px;
+            outline: none;
+            transition: all 0.3s ease;
+            letter-spacing: 0.05em;
+        }
+
+        #text-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 25px rgba(0, 255, 200, 0.3);
+        }
+
+        #text-input::placeholder {
+            color: rgba(255, 255, 255, 0.4);
+        }
+
+        /* Loading */
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 30;
+            text-align: center;
+            color: white;
+            transition: opacity 0.5s;
+        }
+
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .loader {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .status-pill {
+                padding: 10px 18px;
+            }
+            .status-text {
+                font-size: 0.8rem;
+            }
+            #text-input {
+                width: 180px;
+                font-size: 0.9rem;
+                padding: 10px 16px;
+            }
+            .hint-box {
+                padding: 12px 20px;
+            }
+            .hint-emoji {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Video -->
+    <div id="video-container">
+        <video id="video" playsinline autoplay muted></video>
+    </div>
+
+    <!-- Canvas overlay untuk deteksi -->
+    <canvas id="overlay"></canvas>
+
+    <!-- Loading -->
+    <div id="loading">
+        <div class="loader"></div>
+        <p>Memuat AR Hand Tracker...</p>
+    </div>
+
+    <!-- UI -->
+    <div id="ui">
+        <!-- Status -->
+        <div id="status-bar">
+            <div class="status-pill">
+                <div class="status-dot" id="status-dot"></div>
+                <span class="status-text" id="status-text">Mencari tangan...</span>
+            </div>
+        </div>
+
+        <!-- Text Input -->
+        <div id="text-input-container">
+            <input
+            type="text"
+            id="text-input"
+            placeholder="✨ Ketik teks..."
+            maxlength="20"
+            value="Halo!"
+            >
+        </div>
+
+        <!-- Gesture Hint -->
+        <div id="gesture-hint">
+            <div class="hint-box">
+                <span class="hint-emoji">🖐️</span>
+                <span class="hint-text">
+                    <span>Buka</span> tangan = teks muncul &nbsp;|&nbsp;
+                    <span>Kepal</span> = teks hilang
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three.js + MediaPipe -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ========== DOM ELEMENTS ==========
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const ctx = overlay.getContext('2d');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const textInput = document.getElementById('text-input');
+        const loading = document.getElementById('loading');
+
+        // ========== STATE ==========
+        let handDetected = false;
+        let handOpen = false;
+        let lastHandOpen = false;
+        let displayText = textInput.value || 'Halo!';
+        let handPosition = { x: 0.5, y: 0.5, z: 0 };
+        let palmBase = null;
+        let wrist = null;
+        let fingertips = [];
+
+        // Update text from input
+        textInput.addEventListener('input', () => {
+            displayText = textInput.value || '✨';
+        });
+
+        // ========== THREE.JS 3D SCENE (Overlay di atas video) ==========
+        const scene3D = new THREE.Scene();
+        const camera3D = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+        camera3D.position.set(0, 0, 5);
+
+        const renderer3D = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer3D.setSize(window.innerWidth, window.innerHeight);
+        renderer3D.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer3D.domElement.style.position = 'absolute';
+        renderer3D.domElement.style.top = '0';
+        renderer3D.domElement.style.left = '0';
+        renderer3D.domElement.style.zIndex = '3';
+        renderer3D.domElement.style.pointerEvents = 'none';
+        renderer3D.domElement.style.transform = 'scaleX(-1)'; // Mirror juga
+        document.body.appendChild(renderer3D.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5);
+        scene3D.add(ambientLight);
+        const pointLight = new THREE.PointLight(0x00ffc8, 30, 15);
+        pointLight.position.set(0, 2, 3);
+        scene3D.add(pointLight);
+
+        // Text 3D yang akan ditampilkan di telapak tangan
+        let textMesh = null;
+        const textGroup = new THREE.Group();
+        scene3D.add(textGroup);
+
+        function updateTextMesh(text) {
+            // Hapus text lama
+            while (textGroup.children.length > 0) {
+                textGroup.remove(textGroup.children[0]);
+            }
+
+            if (!text || text.trim() === '') return;
+
+            // Buat canvas 2D untuk text
+            const canvas2D = document.createElement('canvas');
+            canvas2D.width = 512;
+            canvas2D.height = 128;
+            const ctx2d = canvas2D.getContext('2d');
+
+            // Background transparan
+            ctx2d.clearRect(0, 0, canvas2D.width, canvas2D.height);
+
+            // Text styling
+            ctx2d.font = 'Bold 64px "Segoe UI", system-ui, sans-serif';
+            ctx2d.textAlign = 'center';
+            ctx2d.textBaseline = 'middle';
+
+            // Gradient text
+            const gradient = ctx2d.createLinearGradient(0, 0, canvas2D.width, 0);
+            gradient.addColorStop(0, '#00ffc8');
+            gradient.addColorStop(0.5, '#ffffff');
+            gradient.addColorStop(1, '#7b2fff');
+            ctx2d.fillStyle = gradient;
+            ctx2d.fillText(text, canvas2D.width / 2, canvas2D.height / 2);
+
+            // Glow effect
+            ctx2d.shadowColor = 'rgba(0, 255, 200, 0.8)';
+            ctx2d.shadowBlur = 20;
+            ctx2d.fillText(text, canvas2D.width / 2, canvas2D.height / 2);
+
+            // Buat texture dari canvas
+            const texture = new THREE.CanvasTexture(canvas2D);
+            texture.minFilter = THREE.LinearFilter;
+            texture.magFilter = THREE.LinearFilter;
+
+            // Buat plane dengan texture
+            const geometry = new THREE.PlaneGeometry(2.5, 0.625);
+            const material = new THREE.MeshBasicMaterial({
+                map: texture,
+                transparent: true,
+                depthTest: false,
+                depthWrite: false,
+            });
+
+            textMesh = new THREE.Mesh(geometry, material);
+            textMesh.renderOrder = 999;
+            textGroup.add(textMesh);
+
+            // Tambah border glow (optional)
+            const borderGeo = new THREE.PlaneGeometry(2.7, 0.7);
+            const borderMat = new THREE.MeshBasicMaterial({
+                color: 0x00ffc8,
+                transparent: true,
+                opacity: 0.3,
+                depthTest: false,
+                depthWrite: false,
+            });
+            const border = new THREE.Mesh(borderGeo, borderMat);
+            border.position.z = -0.01;
+            border.renderOrder = 998;
+            textGroup.add(border);
+        }
+
+        // Initial text
+        updateTextMesh(displayText);
+
+        // Listen for text changes
+        textInput.addEventListener('input', () => {
+            updateTextMesh(textInput.value || '✨');
+        });
+
+        // ========== MEDIAPIPE SETUP ==========
+        // Kita load MediaPipe Hands dari CDN
+        async function loadMediaPipe() {
+            const script1 = document.createElement('script');
+            script1.src =
+                'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js';
+            document.head.appendChild(script1);
+
+            const script2 = document.createElement('script');
+            script2.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js';
+            document.head.appendChild(script2);
+
+            const script3 = document.createElement('script');
+            script3.src =
+            'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js';
+            document.head.appendChild(script3);
+
+            const script4 = document.createElement('script');
+            script4.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js';
+            document.head.appendChild(script4);
+
+            // Tunggu sampai Hands tersedia
+            await new Promise((resolve) => {
+                script4.onload = resolve;
+                // Fallback kalau udah ke-load sebelumnya
+                if (window.Hands) resolve();
+            });
+
+            // Tunggu sebentar untuk memastikan semua siap
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        // ========== ANALISIS GESTURE ==========
+        function analyzeGesture(landmarks) {
+            // Landmark indices:
+            // 0: wrist
+            // 4: thumb tip
+            // 8: index tip
+            // 12: middle tip
+            // 16: ring tip
+            // 20: pinky tip
+            // 5: index mcp (base)
+            // 9: middle mcp
+            // 13: ring mcp
+            // 17: pinky mcp
+
+            wrist = landmarks[0];
+            const thumbTip = landmarks[4];
+            const indexTip = landmarks[8];
+            const middleTip = landmarks[12];
+            const ringTip = landmarks[16];
+            const pinkyTip = landmarks[20];
+
+            const indexMcp = landmarks[5];
+            const middleMcp = landmarks[9];
+            const ringMcp = landmarks[13];
+            const pinkyMcp = landmarks[17];
+
+            // Hitung palm center (rata-rata MCP joints)
+            palmBase = {
+                x: (indexMcp.x + middleMcp.x + ringMcp.x + pinkyMcp.x) / 4,
+                y: (indexMcp.y + middleMcp.y + ringMcp.y + pinkyMcp.y) / 4,
+                z: (indexMcp.z + middleMcp.z + ringMcp.z + pinkyMcp.z) / 4,
+            };
+
+            fingertips = [thumbTip, indexTip, middleTip, ringTip, pinkyTip];
+            const mcpJoints = [landmarks[2], indexMcp, middleMcp, ringMcp, pinkyMcp];
+
+            // Hitung jarak tiap fingertip ke MCP masing-masing
+            // Jika jarak > threshold, jari dianggap terbuka
+            let extendedFingers = 0;
+            for (let i = 0; i < 5; i++) {
+                const tip = fingertips[i];
+                const mcp = mcpJoints[i];
+                const dist = Math.sqrt(
+                    (tip.x - mcp.x) ** 2 + (tip.y - mcp.y) ** 2 + (tip.z - mcp.z) ** 2
+                );
+                // Threshold berbeda untuk thumb
+                const threshold = i === 0 ? 0.12 : 0.1;
+                if (dist > threshold) {
+                    extendedFingers++;
+                }
+            }
+
+            // Tangan terbuka jika minimal 4 jari terentang
+            const isOpen = extendedFingers >= 4;
+
+            // Posisi tangan (palm center dinormalisasi)
+            handPosition = {
+                x: palmBase.x,
+                y: palmBase.y,
+                z: palmBase.z,
+            };
+
+            return {
+                isOpen,
+                extendedFingers,
+                palmPosition: handPosition,
+                landmarks,
+            };
+        }
+
+        // ========== UPDATE 3D TEXT POSITION ==========
+        function updateTextPosition() {
+            if (!textGroup || !handDetected) {
+                textGroup.visible = false;
+                return;
+            }
+
+            if (handOpen && palmBase) {
+                textGroup.visible = true;
+                // Konversi koordinat MediaPipe (0..1) ke koordinat 3D world
+                // x: 0 = kiri, 1 = kanan -> kita mapping ke -3..3
+                // y: 0 = atas, 1 = bawah -> mapping ke 2..-2 (flip)
+                const worldX = (palmBase.x - 0.5) * 7;
+                const worldY = -(palmBase.y - 0.5) * 5 + 0.5;
+                const worldZ = -palmBase.z * 3;
+
+                textGroup.position.set(worldX, worldY, worldZ - 1.5);
+
+                // Rotasi sedikit mengikuti tangan
+                textGroup.rotation.set(0, 0, 0);
+                textGroup.lookAt(camera3D.position);
+
+                // Animasi scale
+                const targetScale = 1;
+                textGroup.scale.lerp(
+                    new THREE.Vector3(targetScale, targetScale, targetScale),
+                    0.2
+                );
+            } else {
+                // Tangan mengepal -> text mengecil & hilang
+                textGroup.scale.lerp(new THREE.Vector3(0, 0, 0), 0.3);
+                if (textGroup.scale.x < 0.05) {
+                    textGroup.visible = false;
+                }
+            }
+        }
+
+        // ========== DRAW HAND LANDMARKS (2D Canvas) ==========
+        function drawLandmarks(landmarks) {
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+            if (!landmarks || landmarks.length === 0) return;
+
+            // Draw connections
+            const connections = [
+                [0, 1],
+                [1, 2],
+                [2, 3],
+                [3, 4],
+                [0, 5],
+                [5, 6],
+                [6, 7],
+                [7, 8],
+                [0, 9],
+                [9, 10],
+                [10, 11],
+                [11, 12],
+                [0, 13],
+                [13, 14],
+                [14, 15],
+                [15, 16],
+                [0, 17],
+                [17, 18],
+                [18, 19],
+                [19, 20],
+                [5, 9],
+                [9, 13],
+                [13, 17],
+            ];
+
+            ctx.strokeStyle = handOpen ?
+                'rgba(0, 255, 200, 0.9)' :
+                'rgba(255, 60, 172, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+
+            for (const [i, j] of connections) {
+                const p1 = landmarks[i];
+                const p2 = landmarks[j];
+                ctx.beginPath();
+        ctx.moveTo(p1.x * overlay.width, p1.y * overlay.height);
+                ctx.lineTo(p2.x * overlay.width, p2.y * overlay.height);
+                ctx.stroke();
+            }
+
+            // Draw points
+            for (const lm of landmarks) {
+                ctx.beginPath();
+                ctx.arc(lm.x * overlay.width, lm.y * overlay.height, 5, 0, 2 * Math.PI);
+                ctx.fillStyle = handOpen ?
+                    'rgba(0, 255, 200, 0.9)' :
+                    'rgba(255, 60, 172, 0.8)';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // Draw palm center glow
+            if (palmBase) {
+                const gradient = ctx.createRadialGradient(
+                    palmBase.x * overlay.width,
+                    palmBase.y * overlay.height,
+                    5,
+                    palmBase.x * overlay.width,
+                    palmBase.y * overlay.height,
+                    40
+                );
+                gradient.addColorStop(0, handOpen ?
+                    'rgba(0, 255, 200, 0.6)' :
+                    'rgba(255, 60, 172, 0.4)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, overlay.width, overlay.height);
+            }
+        }
+
+        // ========== MAIN LOOP (MediaPipe callback) ==========
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+
+                // Analisis gesture
+                const gesture = analyzeGesture(landmarks);
+
+                handDetected = true;
+                lastHandOpen = handOpen;
+                handOpen = gesture.isOpen;
+
+                // Update status
+                if (!lastHandOpen && handOpen) {
+                    // Baru saja buka tangan
+                    statusDot.classList.add('active');
+                    statusText.textContent = '🖐️ Tangan terbuka!';
+                } else if (lastHandOpen && !handOpen) {
+                    // Baru saja mengepal
+                    statusDot.classList.remove('active');
+                    statusText.textContent = '✊ Tangan mengepal';
+                } else if (handOpen) {
+                    statusDot.classList.add('active');
+                    statusText.textContent = '🖐️ Tangan terbuka!';
+                } else {
+                    statusDot.classList.remove('active');
+                    statusText.textContent = '👋 Tangan terdeteksi';
+                }
+
+                // Draw 2D overlay
+                drawLandmarks(landmarks);
+
+                // Update teks 3D (akan dirender di loop animate)
+                if (handOpen && textGroup.visible === false) {
+                    textGroup.visible = true;
+                    textGroup.scale.set(0, 0, 0);
+                }
+
+            } else {
+                // No hand detected
+                handDetected = false;
+                handOpen = false;
+                lastHandOpen = false;
+                palmBase = null;
+                statusDot.classList.remove('active');
+                statusText.textContent = 'Mencari tangan...';
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+            }
+
+            updateTextPosition();
+        }
+
+        // ========== INITIALIZE ==========
+        async function init() {
+            try {
+                // Load MediaPipe
+                await loadMediaPipe();
+
+                // Setup overlay canvas
+                function resizeCanvas() {
+                    overlay.width = window.innerWidth;
+                    overlay.height = window.innerHeight;
+                    renderer3D.setSize(window.innerWidth, window.innerHeight);
+                    camera3D.aspect = window.innerWidth / window.innerHeight;
+                    camera3D.updateProjectionMatrix();
+                }
+                window.addEventListener('resize', resizeCanvas);
+                resizeCanvas();
+
+                // Setup kamera
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user', // Kamera depan (bisa ganti ke 'environment' untuk belakang)
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                    },
+                });
+                video.srcObject = stream;
+                await video.play();
+
+                // Setup MediaPipe Hands
+                const hands = new window.Hands({
+                    locateFile: (file) =>
+                        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`,
+                });
+
+                hands.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.7,
+                    minTrackingConfidence: 0.6,
+                });
+
+                hands.onResults(onResults);
+
+                // Processing loop
+                async function processFrame() {
+                    if (video.readyState >= 2) {
+                        await hands.send({ image: video });
+                    }
+                    requestAnimationFrame(processFrame);
+                }
+                processFrame();
+
+                // Sembunyikan loading
+                loading.classList.add('hidden');
+
+            } catch (err) {
+                console.error('Init error:', err);
+                loading.innerHTML = `
+                    <p style="color: #ff4444;">❌ Gagal mengakses kamera</p>
+                    <p style="font-size: 0.8rem; color: rgba(255,255,255,0.6);">
+                        Pastikan kamu memberi izin kamera & menggunakan browser modern (Chrome/Safari)
+                    </p>
+                `;
+            }
+        }
+
+        // ========== 3D RENDER LOOP ==========
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            // Animasi ringan untuk text
+            if (textGroup.visible && handOpen) {
+                textGroup.rotation.z += 0.01;
+                // Update position setiap frame untuk tracking smooth
+                updateTextPosition();
+            }
+
+            // Animate point light
+            pointLight.intensity = 25 + Math.sin(Date.now() * 0.004) * 8;
+
+            renderer3D.render(scene3D, camera3D);
+        }
+        animate3D();
+
+        // ========== START ==========
+        init();
+    </script>
+</body>
+</html>
