@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>AR Push-Up Counter</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #000;
+      overflow: hidden;
+      height: 100vh; width: 100vw;
+      position: fixed;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    video {
+      position: absolute; top:0; left:0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* mirror untuk kamera depan */
+    }
+
+    #pose-overlay {
+      position: absolute; top:0; left:0;
+      width: 100%; height: 100%;
+      z-index: 5;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+
+    #ui {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+    }
+
+    .counter-box {
+      margin-top: 8vh;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 60px;
+      padding: 1rem 2.5rem;
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: transform 0.15s ease;
+    }
+
+    .counter-value {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 5rem;
+      font-weight: 800;
+      color: white;
+      text-align: center;
+      line-height: 1;
+      text-shadow: 0 0 20px rgba(255,255,255,0.5);
+    }
+
+    .counter-label {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 1rem;
+      color: rgba(255,255,255,0.8);
+      text-align: center;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .status-text {
+      margin-top: 1rem;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      font-size: 1.2rem;
+      color: rgba(255,255,255,0.7);
+      background: rgba(0,0,0,0.4);
+      padding: 0.5rem 1.5rem;
+      border-radius: 30px;
+      backdrop-filter: blur(5px);
+    }
+
+    /* Tombol ganti kamera */
+    #switch-camera {
+      position: absolute;
+      bottom: 30px;
+      right: 20px;
+      z-index: 20;
+      pointer-events: auto;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 40px;
+      color: white;
+      font-size: 1.2rem;
+      padding: 0.7rem 1.2rem;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    #switch-camera:active {
+      background: rgba(255,255,255,0.2);
+    }
+
+    @media (max-width: 600px) {
+      .counter-value { font-size: 3.5rem; }
+      .counter-box { padding: 0.8rem 2rem; }
+      .status-text { font-size: 1rem; }
+      #switch-camera { font-size: 1rem; padding: 0.6rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="pose-overlay"></canvas>
+
+  <div id="ui">
+    <div class="counter-box">
+      <div class="counter-value" id="counter">0</div>
+      <div class="counter-label">Push-Up</div>
+    </div>
+    <div class="status-text" id="status">Siap</div>
+  </div>
+
+  <button id="switch-camera">🔄</button>
+
+  <script type="module">
+    const video = document.getElementById('video');
+    const counterEl = document.getElementById('counter');
+    const statusEl = document.getElementById('status');
+    const poseCanvas = document.getElementById('pose-overlay');
+    const poseCtx = poseCanvas.getContext('2d');
+    const switchBtn = document.getElementById('switch-camera');
+
+    let count = 0;
+    let isDown = false;
+    let readyForNext = true;
+    const DOWN_THRESHOLD = 85;
+    const UP_THRESHOLD = 150;
+    let currentFacingMode = 'user'; // default kamera depan
+
+    function updateCounter(value) {
+      counterEl.textContent = value;
+      counterEl.style.transform = 'scale(1.3)';
+      setTimeout(() => { counterEl.style.transform = 'scale(1)'; }, 150);
+    }
+
+    // Gambar rigid body putih
+    const connections = [
+      [11,12],[12,24],[24,23],[23,11],
+      [11,13],[13,15],[12,14],[14,16],
+      [23,25],[25,27],[24,26],[26,28],
+      [15,17],[16,18],[27,29],[28,30],
+      [29,31],[30,32],[27,31],[28,32]
+    ];
+
+    function drawPose(landmarks) {
+      poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+      if (!landmarks) return;
+      const w = poseCanvas.width;
+      const h = poseCanvas.height;
+      poseCtx.strokeStyle = 'rgba(255,255,255,0.85)';
+      poseCtx.lineWidth = 2;
+      poseCtx.lineCap = 'round';
+      for (const [i, j] of connections) {
+        const p1 = landmarks[i];
+        const p2 = landmarks[j];
+        if (p1.visibility > 0.5 && p2.visibility > 0.5) {
+          poseCtx.beginPath();
+          poseCtx.moveTo(p1.x * w, p1.y * h);
+          poseCtx.lineTo(p2.x * w, p2.y * h);
+          poseCtx.stroke();
+        }
+      }
+      poseCtx.fillStyle = 'rgba(255,255,255,0.9)';
+      for (const lm of landmarks) {
+        if (lm.visibility > 0.5) {
+          poseCtx.beginPath();
+          poseCtx.arc(lm.x * w, lm.y * h, 3.5, 0, 2*Math.PI);
+          poseCtx.fill();
+        }
+      }
+    }
+
+    function calculateAngle(a, b, c) {
+      const ba = { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+      const bc = { x: c.x - b.x, y: c.y - b.y, z: c.z - b.z };
+      const dot = ba.x*bc.x + ba.y*bc.y + ba.z*bc.z;
+      const magBA = Math.sqrt(ba.x**2 + ba.y**2 + ba.z**2);
+      const magBC = Math.sqrt(bc.x**2 + bc.y**2 + bc.z**2);
+      if (magBA === 0 || magBC === 0) return 180;
+      const cos = Math.max(-1, Math.min(1, dot/(magBA*magBC)));
+      return Math.acos(cos) * (180/Math.PI);
+    }
+
+    function processPose(landmarks) {
+      if (!landmarks || landmarks.length < 33) return;
+      const leftShoulder  = landmarks[11];
+      const leftElbow     = landmarks[13];
+      const leftWrist     = landmarks[15];
+      const rightShoulder = landmarks[12];
+      const rightElbow    = landmarks[14];
+      const rightWrist    = landmarks[16];
+      const leftAngle  = calculateAngle(leftShoulder, leftElbow, leftWrist);
+      const rightAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+      const avgAngle = (leftAngle + rightAngle) / 2;
+
+      if (!isDown && avgAngle < DOWN_THRESHOLD && readyForNext) {
+        isDown = true;
+        readyForNext = false;
+        statusEl.textContent = 'Turun';
+      } else if (isDown && avgAngle > UP_THRESHOLD) {
+        isDown = false;
+        readyForNext = true;
+        count++;
+        updateCounter(count);
+        statusEl.textContent = 'Naik';
+      } else if (!isDown && avgAngle >= UP_THRESHOLD) {
+        statusEl.textContent = 'Siap';
+      }
+    }
+
+    async function loadMediaPipePose() {
+      const scripts = [
+        'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js',
+        'https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js',
+        'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js',
+        'https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js'
+      ];
+      for (const src of scripts) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = src;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    let stream = null;
+    async function startCamera(facingMode) {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          facingMode: facingMode,
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      });
+      video.srcObject = stream;
+      await video.play();
+    }
+
+    // Ganti kamera
+    switchBtn.addEventListener('click', async () => {
+      currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+      await startCamera(currentFacingMode);
+    });
+
+    async function init() {
+      try {
+        await loadMediaPipePose();
+        await startCamera('user'); // mulai dengan kamera depan
+
+        function resizeOverlay() {
+          poseCanvas.width = window.innerWidth;
+          poseCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeOverlay);
+        resizeOverlay();
+
+        const pose = new window.Pose({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${file}`
+        });
+        pose.setOptions({
+          modelComplexity: 1,
+          smoothLandmarks: true,
+          enableSegmentation: false,
+          minDetectionConfidence: 0.6,
+          minTrackingConfidence: 0.5
+        });
+
+        pose.onResults((results) => {
+          if (results.poseLandmarks) {
+            drawPose(results.poseLandmarks);
+            processPose(results.poseLandmarks);
+          } else {
+            poseCtx.clearRect(0, 0, poseCanvas.width, poseCanvas.height);
+            statusEl.textContent = 'Cari pose...';
+          }
+        });
+
+        async function processFrame() {
+          if (video.readyState >= 2) {
+            await pose.send({ image: video });
+          }
+          requestAnimationFrame(processFrame);
+        }
+        processFrame();
+
+      } catch (err) {
+        alert('Gagal mengakses kamera: ' + err.message);
+      }
+    }
+
+    init();
+  </script>
+</body>
+  </html>
