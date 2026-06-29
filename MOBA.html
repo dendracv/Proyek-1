@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mini Legends MOBA</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #000; overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      user-select: none; -webkit-user-select: none;
+      position: fixed; height: 100%; width: 100%;
+      touch-action: manipulation;
+    }
+    canvas { display: block; }
+
+    /* UI overlay */
+    #ui {
+      position: absolute; top:0; left:0; width:100%; height:100%;
+      pointer-events: none; z-index: 10;
+    }
+
+    /* Health bar (diposisikan via JS) */
+    #hero-hp-container {
+      position: absolute; transform: translate(-50%, -50%);
+      width: 60px; height: 8px; background: rgba(0,0,0,0.6);
+      border-radius: 4px; border: 1px solid rgba(255,255,255,0.3);
+    }
+    #hero-hp-fill {
+      height: 100%; background: #4caf50; border-radius: 4px; width: 100%;
+    }
+
+    /* Minimap */
+    #minimap {
+      position: absolute; top: 10px; left: 10px;
+      width: 90px; height: 90px; background: rgba(0,0,0,0.7);
+      border: 2px solid rgba(255,215,0,0.8); border-radius: 50%;
+      backdrop-filter: blur(4px);
+    }
+
+    /* Gold & level */
+    #gold-level {
+      position: absolute; top: 12px; right: 12px;
+      color: gold; font-weight: bold; font-size: 13px;
+      text-shadow: 0 0 5px #000;
+      background: rgba(0,0,0,0.5); padding: 4px 12px; border-radius: 12px;
+    }
+
+    /* Joystick */
+    .joystick-base {
+      position: absolute; bottom: 40px; left: 40px;
+      width: 100px; height: 100px; background: rgba(255,255,255,0.12);
+      border: 2px solid rgba(255,255,255,0.5); border-radius: 50%;
+      pointer-events: auto; touch-action: none;
+    }
+    .joystick-thumb {
+      position: absolute; width: 50px; height: 50px;
+      background: rgba(255,255,255,0.8); border-radius: 50%;
+      left: 25px; top: 25px; transition: background 0.1s;
+    }
+
+    /* Skill panel */
+    #skill-panel {
+      position: absolute; bottom: 30px; right: 15px;
+      display: flex; gap: 8px; pointer-events: auto;
+    }
+    .skill-btn {
+      width: 56px; height: 56px; background: rgba(0,0,0,0.6);
+      border: 2px solid rgba(255,255,255,0.7); border-radius: 50%;
+      color: white; font-weight: bold; font-size: 15px;
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(4px); position: relative;
+      pointer-events: auto;
+    }
+    .skill-btn .cd-overlay {
+      position: absolute; top:0; left:0; width:100%; height:100%;
+      border-radius:50%; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center;
+      color: white; font-size: 13px;
+    }
+    #basic-attack {
+      width: 66px; height: 66px;
+      background: rgba(200,40,40,0.8);
+      border: 2px solid white; border-radius: 50%;
+      margin-top: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: bold; color: white; font-size: 22px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <div id="hero-hp-container"><div id="hero-hp-fill"></div></div>
+    <canvas id="minimap" width="90" height="90"></canvas>
+    <div id="gold-level">🪙 <span id="gold-text">500</span> ⭐<span id="level-text">1</span></div>
+    <div class="joystick-base" id="joystickBase">
+      <div class="joystick-thumb" id="joystickThumb"></div>
+    </div>
+    <div id="skill-panel">
+      <div class="skill-btn" id="skillQ">Q<div class="cd-overlay" id="cdQ"></div></div>
+      <div class="skill-btn" id="skillW">W<div class="cd-overlay" id="cdW"></div></div>
+      <div class="skill-btn" id="skillE">E<div class="cd-overlay" id="cdE"></div></div>
+      <div class="skill-btn" id="basic-attack">⚔️</div>
+    </div>
+  </div>
+
+  <!-- Import map -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    // ========== GAME STATE ==========
+    const state = {
+      hero: {
+        pos: new THREE.Vector3(0, 0.3, -10),
+        hp: 100, maxHp: 100,
+        level: 1, exp: 0, expToNext: 100,
+        gold: 500,
+        attackDamage: 25,
+        moveSpeed: 0.12,
+        cooldowns: { Q:0, W:0, E:0 },
+        team: 'blue'
+      },
+      enemies: [],
+      minions: [],
+      towers: [],
+      gameOver: false
+    };
+
+    // ========== THREE.JS SETUP ==========
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x1a3a1a);
+    scene.fog = new THREE.Fog(0x1a3a1a, 20, 60);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 1, 200);
+    camera.position.set(0, 20, 5);
+    camera.lookAt(0,0,0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // OrbitControls dengan batasan agar seperti kamera MOBA
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(0, 0, -5);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.maxPolarAngle = Math.PI/2.4;
+    controls.minDistance = 8;
+    controls.maxDistance = 22;
+    controls.enablePan = false;
+    controls.rotateSpeed = 0.5;
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x445544));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    dirLight.position.set(10, 20, 10);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    // Ground
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(40, 40),
+      new THREE.MeshStandardMaterial({ color: 0x2d5a2d })
+    );
+    ground.rotation.x = -Math.PI/2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Lanes
+    function addLane(x) {
+      const lane = new THREE.Mesh(
+        new THREE.PlaneGeometry(2, 40),
+        new THREE.MeshStandardMaterial({ color: 0x8b7355 })
+      );
+      lane.rotation.x = -Math.PI/2;
+      lane.position.set(x, 0.01, 0);
+      lane.receiveShadow = true;
+      scene.add(lane);
+    }
+    addLane(-8); addLane(0); addLane(8);
+
+    // Bases
+    new THREE.Mesh(
+      new THREE.CylinderGeometry(2,2,3,16),
+      new THREE.MeshStandardMaterial({ color: 0x3366cc })
+    ).position.set(0,1.5,-18).castShadow = true, scene.add(...);
+    // (simplified)
+    const blueBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(2,2,3,16),
+      new THREE.MeshStandardMaterial({ color: 0x3366cc })
+    );
+    blueBase.position.set(0,1.5,-18);
+    blueBase.castShadow = true;
+    scene.add(blueBase);
+    const redBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(2,2,3,16),
+      new THREE.MeshStandardMaterial({ color: 0xcc3333 })
+    );
+    redBase.position.set(0,1.5,18);
+    redBase.castShadow = true;
+    scene.add(redBase);
+
+    // Towers
+    function createTower(x, z, team) {
+      const color = team === 'blue' ? 0x4488ff : 0xff4444;
+      const tower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.8,1.2,4,8),
+        new THREE.MeshStandardMaterial({ color })
+      );
+      tower.position.set(x, 2, z);
+      tower.castShadow = true;
+      tower.userData = { team, attackRange: 8, damage: 30, cooldown: 0, fireRate: 0.8 };
+      scene.add(tower);
+      state.towers.push(tower);
+    }
+    createTower(-8, -12, 'blue');
+    createTower(0, -12, 'blue');
+    createTower(8, -12, 'blue');
+    createTower(-8, 12, 'red');
+    createTower(0, 12, 'red');
+    createTower(8, 12, 'red');
+
+    // Hero mesh
+    const heroMesh = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.5, 1.0, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x44aaff })
+    );
+    heroMesh.castShadow = true;
+    heroMesh.position.copy(state.hero.pos);
+    scene.add(heroMesh);
+
+    // Enemy hero
+    const enemyMesh = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.5, 1.0, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0xff4444 })
+    );
+    enemyMesh.position.set(0, 0.3, 10);
+    enemyMesh.castShadow = true;
+    scene.add(enemyMesh);
+    state.enemies.push({
+      mesh: enemyMesh,
+      pos: new THREE.Vector3(0, 0.3, 10),
+      hp: 100, maxHp: 100,
+      attackCooldown: 0,
+      stunned: 0
+    });
+
+    // Minion spawn
+    function spawnMinion(team, laneX) {
+      const z = team === 'blue' ? -18 : 18;
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5, 0.7, 0.5),
+        new THREE.MeshStandardMaterial({ color: team === 'blue' ? 0x3399ff : 0xff6633 })
+      );
+      mesh.position.set(laneX, 0.35, z);
+      mesh.castShadow = true;
+      scene.add(mesh);
+      state.minions.push({
+        mesh,
+        hp: 30, maxHp: 30,
+        team,
+        laneX,
+        speed: 0.03 * (team === 'blue' ? 1 : -1),
+        attackDamage: 8,
+        attackTimer: 0
+      });
+    }
+    setInterval(() => {
+      [-8,0,8].forEach(l => { spawnMinion('blue', l); spawnMinion('red', l); });
+    }, 10000);
+    [-8,0,8].forEach(l => { spawnMinion('blue', l); spawnMinion('red', l); });
+
+    // ========== JOYSTICK ==========
+    let joystickActive = false, joystickX = 0, joystickY = 0;
+    const joystickBase = document.getElementById('joystickBase');
+    const joystickThumb = document.getElementById('joystickThumb');
+    const baseRadius = 45;
+
+    function updateJoystickPos(clientX, clientY) {
+      const rect = joystickBase.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      let dx = clientX - cx;
+      let dy = clientY - cy;
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      const max = baseRadius;
+      if (dist > max) { dx = dx/dist*max; dy = dy/dist*max; }
+      joystickThumb.style.left = (25 + dx*0.5) + 'px';
+      joystickThumb.style.top = (25 + dy*0.5) + 'px';
+      joystickX = dx / max;
+      joystickY = dy / max;
+    }
+
+    joystickBase.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      joystickActive = true;
+      updateJoystickPos(e.touches[0].clientX, e.touches[0].clientY);
+    });
+    joystickBase.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!joystickActive) return;
+      updateJoystickPos(e.touches[0].clientX, e.touches[0].clientY);
+    });
+    joystickBase.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      joystickActive = false;
+      joystickX = 0; joystickY = 0;
+      joystickThumb.style.left = '25px';
+      joystickThumb.style.top = '25px';
+    });
+
+    // ========== BASIC ATTACK ==========
+    document.getElementById('basic-attack').addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const hpos = state.hero.pos;
+      let target = null, minDist = 3;
+      // enemy hero
+      state.enemies.forEach(e => {
+        const d = hpos.distanceTo(e.pos);
+        if (d < minDist) { minDist = d; target = e; }
+      });
+      // minion musuh
+      state.minions.forEach(m => {
+        if (m.team !== 'blue') {
+          const d = hpos.distanceTo(m.mesh.position);
+          if (d < minDist) { minDist = d; target = m; }
+        }
+      });
+      if (target) {
+        target.hp -= state.hero.attackDamage;
+        if (target.hp <= 0) {
+          scene.remove(target.mesh);
+          if (target.team) state.enemies = state.enemies.filter(e => e !== target);
+          else state.minions = state.minions.filter(m => m !== target);
+          state.hero.gold += 30;
+          state.hero.exp += 20;
+          checkLevelUp();
+        }
+      }
+    });
+
+    // ========== SKILLS ==========
+    ['Q','W','E'].forEach(skill => {
+      document.getElementById(`skill${skill}`).addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const h = state.hero;
+        if (h.cooldowns[skill] > 0) return;
+        switch(skill) {
+          case 'Q': h.pos.z -= 1.5; h.cooldowns.Q = 4; break;
+          case 'W':
+            state.minions.forEach(m => {
+              if (m.team !== 'blue' && h.pos.distanceTo(m.mesh.position) < 3) m.hp -= 40;
+            });
+            state.enemies.forEach(e => {
+              if (h.pos.distanceTo(e.pos) < 3) e.hp -= 40;
+            });
+            h.cooldowns.W = 7;
+            break;
+          case 'E':
+            state.enemies.forEach(e => {
+              if (h.pos.distanceTo(e.pos) < 2.5) e.stunned = 2;
+            });
+            h.cooldowns.E = 9;
+            break;
+        }
+      });
+    });
+
+    function checkLevelUp() {
+      const h = state.hero;
+      while (h.exp >= h.expToNext) {
+        h.level++;
+        h.exp -= h.expToNext;
+        h.expToNext = Math.floor(h.expToNext * 1.5);
+        h.maxHp += 20; h.hp = h.maxHp;
+        h.attackDamage += 5;
+      }
+    }
+
+    // ========== GAME LOOP ==========
+    function updateCooldowns(delta) {
+      for (let s of ['Q','W','E']) {
+        if (state.hero.cooldowns[s] > 0) {
+          state.hero.cooldowns[s] -= delta;
+          if (state.hero.cooldowns[s] < 0) state.hero.cooldowns[s] = 0;
+        }
+      }
+    }
+
+    function towerAI(delta) {
+      state.towers.forEach(tower => {
+        const tpos = tower.position;
+        const team = tower.userData.team;
+        let target = null, minDist = tower.userData.attackRange;
+        // Cari target
+        if (team === 'blue') {
+          state.enemies.forEach(e => {
+            const d = tpos.distanceTo(e.pos);
+            if (d < minDist) { minDist = d; target = e; }
+          });
+          state.minions.forEach(m => {
+            if (m.team === 'red') {
+              const d = tpos.distanceTo(m.mesh.position);
+              if (d < minDist) { minDist = d; target = m; }
+            }
+          });
+        } else {
+          const d = tpos.distanceTo(state.hero.pos);
+          if (d < minDist) { minDist = d; target = { hp: state.hero.hp, mesh: heroMesh }; }
+          state.minions.forEach(m => {
+            if (m.team === 'blue') {
+              const d = tpos.distanceTo(m.mesh.position);
+              if (d < minDist) { minDist = d; target = m; }
+            }
+          });
+        }
+        if (target) {
+          tower.userData.cooldown += delta;
+          if (tower.userData.cooldown >= 1/tower.userData.fireRate) {
+            tower.userData.cooldown = 0;
+            target.hp -= tower.userData.damage;
+            if (target.hp <= 0) {
+              if (target.mesh) scene.remove(target.mesh);
+              state.enemies = state.enemies.filter(e => e !== target);
+              state.minions = state.minions.filter(m => m !== target);
+            }
+          }
+        }
+      });
+    }
+
+    function enemyAI(delta) {
+      const enemy = state.enemies[0];
+      if (!enemy) return;
+      const dir = new THREE.Vector3().subVectors(state.hero.pos, enemy.pos).normalize();
+      if (enemy.pos.distanceTo(state.hero.pos) > 1.8) {
+        enemy.pos.add(dir.clone().multiplyScalar(0.04));
+      }
+      enemy.attackCooldown -= delta;
+      if (enemy.pos.distanceTo(state.hero.pos) < 1.6 && enemy.attackCooldown <= 0) {
+        state.hero.hp -= 15;
+        enemy.attackCooldown = 1.2;
+      }
+      enemy.mesh.position.copy(enemy.pos);
+    }
+
+    function minionLogic() {
+      state.minions.forEach(m => {
+        const enemies = state.minions.filter(o => o.team !== m.team);
+        let target = null, minDist = 2.5;
+        enemies.forEach(e => {
+          const d = m.mesh.position.distanceTo(e.mesh.position);
+          if (d < minDist) { minDist = d; target = e; }
+        });
+        if (!target) {
+          m.mesh.position.z += m.speed;
+        } else {
+          m.attackTimer += 0.016;
+          if (m.attackTimer >= 1) {
+            m.attackTimer = 0;
+            target.hp -= m.attackDamage;
+            if (target.hp <= 0) {
+              scene.remove(target.mesh);
+              state.minions = state.minions.filter(x => x !== target);
+              if (m.team === 'blue') state.hero.gold += 15;
+            }
+          }
+        }
+      });
+    }
+
+    function updateUI() {
+      // HP bar position
+      const pos = state.hero.pos.clone().project(camera);
+      const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+      const container = document.getElementById('hero-hp-container');
+      container.style.left = x + 'px';
+      container.style.top = (y - 40) + 'px';
+      const percent = Math.max(0, state.hero.hp / state.hero.maxHp * 100);
+      document.getElementById('hero-hp-fill').style.width = percent + '%';
+
+      // Gold & level
+      document.getElementById('gold-text').textContent = Math.floor(state.hero.gold);
+      document.getElementById('level-text').textContent = state.hero.level;
+
+      // Skill cooldowns
+      ['Q','W','E'].forEach(s => {
+        const cd = state.hero.cooldowns[s];
+        const overlay = document.getElementById('cd' + s);
+        if (cd > 0) {
+          overlay.style.display = 'flex';
+          overlay.textContent = cd.toFixed(1);
+        } else {
+          overlay.style.display = 'none';
+        }
+      });
+
+      // Minimap
+      const canvas = document.getElementById('minimap');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,90,90);
+      // draw hero
+      const px = (state.hero.pos.x/20)*45 + 45;
+      const py = (state.hero.pos.z/20)*45 + 45;
+      ctx.fillStyle = 'blue';
+      ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2); ctx.fill();
+      // draw enemy
+      if (state.enemies[0]) {
+        const ex = (state.enemies[0].pos.x/20)*45 + 45;
+        const ey = (state.enemies[0].pos.z/20)*45 + 45;
+        ctx.fillStyle = 'red';
+        ctx.beginPath(); ctx.arc(ex,ey,3,0,Math.PI*2); ctx.fill();
+      }
+    }
+
+    // ========== ANIMATION LOOP ==========
+    let lastTime = performance.now();
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const delta = Math.min(0.1, (now - lastTime) / 1000);
+      lastTime = now;
+
+      if (!state.gameOver) {
+        // Movement dari joystick
+        if (joystickActive) {
+          const move = new THREE.Vector3(joystickX, 0, joystickY);
+          if (move.length() > 0) {
+            move.normalize().multiplyScalar(state.hero.moveSpeed);
+            state.hero.pos.add(move);
+          }
+        }
+        heroMesh.position.copy(state.hero.pos);
+
+        updateCooldowns(delta);
+        towerAI(delta);
+        enemyAI(delta);
+        minionLogic();
+
+        if (state.hero.hp <= 0) {
+          state.hero.hp = state.hero.maxHp;
+          state.hero.pos.set(0, 0.3, -10);
+          heroMesh.position.copy(state.hero.pos);
+        }
+      }
+
+      // Kamera follow
+      controls.target.lerp(state.hero.pos.clone().setY(0), 0.1);
+      controls.update();
+
+      updateUI();
+      renderer.render(scene, camera);
+    }
+    animate(performance.now());
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+  </html>
