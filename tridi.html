@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Open World 3D Explorer</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #000; overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      user-select: none; -webkit-user-select: none;
+      position: fixed; height: 100%; width: 100%;
+      touch-action: manipulation;
+    }
+    canvas { display: block; }
+
+    #ui {
+      position: absolute; top:0; left:0; width:100%; height:100%;
+      pointer-events: none; z-index: 10;
+    }
+
+    /* Minimap */
+    #minimap {
+      position: absolute; top: 15px; right: 15px;
+      width: 80px; height: 80px; background: rgba(0,0,0,0.7);
+      border: 2px solid gold; border-radius: 50%;
+    }
+
+    /* Joystick kiri */
+    .joystick-base {
+      position: absolute; bottom: 40px; left: 30px;
+      width: 100px; height: 100px; background: rgba(255,255,255,0.1);
+      border: 2px solid rgba(255,255,255,0.4); border-radius: 50%;
+      pointer-events: auto; touch-action: none;
+    }
+    .joystick-thumb {
+      position: absolute; width: 45px; height: 45px;
+      background: rgba(255,255,255,0.8); border-radius: 50%;
+      left: 27.5px; top: 27.5px; transition: background 0.1s;
+    }
+
+    /* Area rotasi kamera (kanan) */
+    #rotate-area {
+      position: absolute; bottom: 40px; right: 30px;
+      width: 100px; height: 100px; background: rgba(255,255,255,0.05);
+      border: 2px dashed rgba(255,255,255,0.3); border-radius: 50%;
+      pointer-events: auto; touch-action: none;
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.5); font-size: 32px;
+    }
+
+    /* Label compass */
+    #compass {
+      position: absolute; top: 15px; left: 15px;
+      color: white; font-weight: bold; text-shadow: 0 0 5px black;
+      background: rgba(0,0,0,0.5); padding: 4px 10px; border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <canvas id="minimap" width="80" height="80"></canvas>
+    <div id="compass">🧭 N</div>
+    <div class="joystick-base" id="joystickBase">
+      <div class="joystick-thumb" id="joystickThumb"></div>
+    </div>
+    <div id="rotate-area">↻</div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ========== SCENE SETUP ==========
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB); // langit biru
+    scene.fog = new THREE.Fog(0x87CEEB, 50, 150);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.5, 300);
+    camera.position.set(0, 30, 15);
+    camera.lookAt(0,0,0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x6688aa));
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.2);
+    sun.position.set(50, 80, 30);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 1024;
+    sun.shadow.mapSize.height = 1024;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -50;
+    sun.shadow.camera.right = 50;
+    sun.shadow.camera.top = 50;
+    sun.shadow.camera.bottom = -50;
+    scene.add(sun);
+
+    // ========== TERRAIN ==========
+    const terrainSize = 200;
+    const segments = 128;
+    const terrainGeometry = new THREE.PlaneGeometry(terrainSize, terrainSize, segments, segments);
+    terrainGeometry.rotateX(-Math.PI/2);
+    const positions = terrainGeometry.attributes.position.array;
+    
+    // Simple procedural height (sine-based noise)
+    function getHeight(x, z) {
+      return Math.sin(x*0.08) * Math.cos(z*0.08) * 4 
+           + Math.sin(x*0.2) * Math.cos(z*0.3) * 3
+           + Math.cos(x*0.5 + z*0.4) * 2;
+    }
+
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const z = positions[i+2];
+      positions[i+1] = getHeight(x, z);
+    }
+    terrainGeometry.computeVertexNormals();
+    
+    const terrainMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x4a7c3f, 
+      roughness: 0.8,
+      metalness: 0.1
+    });
+    const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+    terrain.receiveShadow = true;
+    scene.add(terrain);
+
+    // Water plane (sedikit transparan)
+    const waterGeometry = new THREE.PlaneGeometry(terrainSize, terrainSize);
+    const waterMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x1a4d8c, 
+      roughness: 0.2, 
+      metalness: 0.8,
+      transparent: true,
+      opacity: 0.6
+    });
+    const water = new THREE.Mesh(waterGeometry, waterMaterial);
+    water.rotation.x = -Math.PI/2;
+    water.position.y = -1.5;
+    water.receiveShadow = true;
+    scene.add(water);
+
+    // ========== OBJEK DEKORASI ==========
+    function createTree(x, z) {
+      const group = new THREE.Group();
+      const y = getHeight(x, z);
+      
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.5, 2.5),
+        new THREE.MeshStandardMaterial({ color: 0x8B5A2B })
+      );
+      trunk.position.y = 1.25;
+      trunk.castShadow = true;
+      trunk.receiveShadow = true;
+      group.add(trunk);
+      
+      const leaves = new THREE.Mesh(
+        new THREE.ConeGeometry(1.2, 3, 8),
+        new THREE.MeshStandardMaterial({ color: 0x2d5a27 })
+      );
+      leaves.position.y = 3.2;
+      leaves.castShadow = true;
+      leaves.receiveShadow = true;
+      group.add(leaves);
+      
+      group.position.set(x, y, z);
+      return group;
+    }
+
+    function createRock(x, z) {
+      const y = getHeight(x, z);
+      const rock = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.5 + Math.random()*0.7, 0),
+        new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9 })
+      );
+      rock.position.set(x, y - 0.2, z);
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      return rock;
+    }
+
+    // Populasi pohon dan batu
+    for (let i = 0; i < 150; i++) {
+      const x = (Math.random() - 0.5) * terrainSize * 0.8;
+      const z = (Math.random() - 0.5) * terrainSize * 0.8;
+      scene.add(createTree(x, z));
+    }
+    for (let i = 0; i < 200; i++) {
+      const x = (Math.random() - 0.5) * terrainSize * 0.9;
+      const z = (Math.random() - 0.5) * terrainSize * 0.9;
+      scene.add(createRock(x, z));
+    }
+
+    // ========== PLAYER ==========
+    const player = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.8, 1.5, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffaa00 })
+    );
+    player.castShadow = true;
+    player.receiveShadow = true;
+    scene.add(player);
+    
+    const playerState = {
+      position: new THREE.Vector3(0, 0, 0),
+      rotation: 0, // yaw dalam radian
+      velocity: new THREE.Vector3(),
+      speed: 0.2,
+      turnSpeed: 0.05
+    };
+
+    // Tempatkan player di atas terrain
+    function updatePlayerHeight() {
+      const raycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0), 0, 20);
+      raycaster.set(playerState.position.clone().add(new THREE.Vector3(0, 5, 0)), new THREE.Vector3(0, -1, 0));
+      const intersects = raycaster.intersectObject(terrain);
+      if (intersects.length > 0) {
+        playerState.position.y = intersects[0].point.y + 1.2;
+      } else {
+        playerState.position.y = 1.2;
+      }
+    }
+    updatePlayerHeight();
+    player.position.copy(playerState.position);
+
+    // ========== KONTROL ==========
+    // Joystick
+    const joystickBase = document.getElementById('joystickBase');
+    const joystickThumb = document.getElementById('joystickThumb');
+    let joystickActive = false;
+    let moveX = 0, moveZ = 0;
+
+    function updateJoystick(clientX, clientY) {
+      const rect = joystickBase.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      let dx = clientX - cx;
+      let dy = clientY - cy;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const maxRadius = 40;
+      if (dist > maxRadius) {
+        dx = dx/dist * maxRadius;
+        dy = dy/dist * maxRadius;
+      }
+      joystickThumb.style.left = (27.5 + dx*0.7) + 'px';
+      joystickThumb.style.top = (27.5 + dy*0.7) + 'px';
+      moveX = dx / maxRadius;
+      moveZ = dy / maxRadius;
+    }
+
+    joystickBase.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      joystickActive = true;
+      updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+    });
+    joystickBase.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (joystickActive) updateJoystick(e.touches[0].clientX, e.touches[0].clientY);
+    });
+    joystickBase.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      joystickActive = false;
+      moveX = 0; moveZ = 0;
+      joystickThumb.style.left = '27.5px';
+      joystickThumb.style.top = '27.5px';
+    });
+
+    // Rotasi kamera (area kanan)
+    const rotateArea = document.getElementById('rotate-area');
+    let rotateActive = false;
+    let lastRotateX = 0;
+
+    rotateArea.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      rotateActive = true;
+      lastRotateX = e.touches[0].clientX;
+    });
+    rotateArea.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!rotateActive) return;
+      const dx = e.touches[0].clientX - lastRotateX;
+      playerState.rotation -= dx * 0.01;
+      lastRotateX = e.touches[0].clientX;
+    });
+    rotateArea.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      rotateActive = false;
+    });
+
+    // Keyboard (PC)
+    const keys = {};
+    window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+    window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; e.preventDefault(); });
+
+    // ========== GAME LOOP ==========
+    let lastTime = performance.now();
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const delta = Math.min(0.1, (now - lastTime) / 1000);
+      lastTime = now;
+
+      // Input gerak
+      let inputX = moveX;
+      let inputZ = moveZ;
+      if (keys['w'] || keys['arrowup']) inputZ = -1;
+      if (keys['s'] || keys['arrowdown']) inputZ = 1;
+      if (keys['a'] || keys['arrowleft']) inputX = -1;
+      if (keys['d'] || keys['arrowright']) inputX = 1;
+      
+      if (inputX !== 0 || inputZ !== 0) {
+        // Arah relatif terhadap rotasi player
+        const angle = playerState.rotation;
+        const forward = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle));
+        const right = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle));
+        const moveDir = new THREE.Vector3(0,0,0)
+          .add(forward.clone().multiplyScalar(-inputZ))
+          .add(right.clone().multiplyScalar(inputX))
+          .normalize();
+        playerState.position.add(moveDir.multiplyScalar(playerState.speed));
+      }
+
+      // Rotasi keyboard
+      if (keys['q']) playerState.rotation += 0.03;
+      if (keys['e']) playerState.rotation -= 0.03;
+
+      updatePlayerHeight();
+      player.position.copy(playerState.position);
+      player.rotation.y = playerState.rotation;
+
+      // Kamera follow third-person
+      const camDist = 8;
+      const camHeight = 5;
+      const camTarget = playerState.position.clone();
+      const camPos = camTarget.clone()
+        .add(new THREE.Vector3(-Math.sin(playerState.rotation) * camDist, camHeight, -Math.cos(playerState.rotation) * camDist));
+      camera.position.lerp(camPos, 0.1);
+      camera.lookAt(camTarget);
+
+      // Minimap
+      const canvas = document.getElementById('minimap');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0,0,80,80);
+      ctx.fillStyle = '#2d5a27';
+      ctx.fillRect(0,0,80,80);
+      const px = (playerState.position.x / terrainSize) * 40 + 40;
+      const py = (playerState.position.z / terrainSize) * 40 + 40;
+      ctx.fillStyle = 'orange';
+      ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+
+      // Compass
+      const dir = Math.round(playerState.rotation * 180/Math.PI);
+      document.getElementById('compass').textContent = `🧭 ${((dir % 360) + 360) % 360}°`;
+
+      renderer.render(scene, camera);
+    }
+    animate(performance.now());
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+  </html>
