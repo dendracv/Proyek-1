@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mini Minecraft</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #000; overflow: hidden;
+      font-family: 'Segoe UI', sans-serif;
+      user-select: none; -webkit-user-select: none;
+      position: fixed; height: 100%; width: 100%;
+      touch-action: manipulation;
+    }
+    canvas { display: block; }
+
+    /* Crosshair */
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      width: 20px; height: 20px; transform: translate(-50%,-50%);
+      pointer-events: none; z-index: 20;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255,255,255,0.9);
+    }
+    #crosshair::before { width: 2px; height: 100%; left: 9px; }
+    #crosshair::after { height: 2px; width: 100%; top: 9px; }
+
+    /* Joystick gerak */
+    .joystick-move {
+      position: absolute; bottom: 140px; left: 35px;
+      width: 95px; height: 95px; background: rgba(255,255,255,0.08);
+      border: 2px solid rgba(255,255,255,0.35); border-radius: 50%;
+      pointer-events: auto; touch-action: none; z-index: 30;
+    }
+    .joystick-move .thumb {
+      position: absolute; width: 42px; height: 42px;
+      background: rgba(255,255,255,0.7); border-radius: 50%;
+      left: 26.5px; top: 26.5px;
+    }
+
+    /* Hotbar */
+    #hotbar {
+      position: absolute; bottom: 25px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 4px; z-index: 30;
+      background: rgba(0,0,0,0.5); padding: 5px 8px;
+      border-radius: 8px; backdrop-filter: blur(4px);
+    }
+    .slot {
+      width: 48px; height: 48px; background: rgba(0,0,0,0.5);
+      border: 2px solid rgba(255,255,255,0.3); border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; color: white; pointer-events: auto;
+    }
+    .slot.selected { border-color: white; box-shadow: 0 0 10px white; }
+
+    /* Tombol aksi kanan */
+    #jump-btn {
+      position: absolute; bottom: 200px; right: 25px;
+      width: 70px; height: 70px; border-radius: 50%;
+      background: rgba(255,255,255,0.2); border: 2px solid white;
+      color: white; font-size: 28px; display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; z-index: 30;
+    }
+    #break-btn {
+      position: absolute; bottom: 100px; right: 110px;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.7);
+      color: white; font-size: 24px; display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; z-index: 30;
+    }
+    #place-btn {
+      position: absolute; bottom: 100px; right: 30px;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: rgba(0,0,0,0.6); border: 2px solid rgba(255,255,255,0.7);
+      color: white; font-size: 24px; display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; z-index: 30;
+    }
+    .ui-btn:active { background: rgba(255,255,255,0.4) !important; }
+  </style>
+</head>
+<body>
+  <div id="crosshair"></div>
+  <div class="joystick-move ui-btn" id="joystickMove">
+    <div class="thumb" id="moveThumb"></div>
+  </div>
+
+  <div id="hotbar">
+    <div class="slot selected" data-block="dirt">🟫</div>
+    <div class="slot" data-block="grass">🟩</div>
+    <div class="slot" data-block="stone">⬜</div>
+    <div class="slot" data-block="wood">🟨</div>
+    <div class="slot" data-block="leaf">🌿</div>
+    <div class="slot" data-block="sand">🏖️</div>
+    <div class="slot" data-block="brick">🧱</div>
+  </div>
+
+  <div id="jump-btn" class="ui-btn">🦘</div>
+  <div id="break-btn" class="ui-btn">⛏️</div>
+  <div id="place-btn" class="ui-btn">🧱</div>
+
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ========== AUDIO (procedural) ==========
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
+    function initAudio() {
+      if (!audioCtx) audioCtx = new AudioContext();
+    }
+    function playSound(freq, duration, type = 'square') {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // ========== WORLD ==========
+    const world = {};
+    const BLOCK = 1;
+
+    function getBlock(x, y, z) { return world[`${x},${y},${z}`] || null; }
+    function setBlock(x, y, z, type) {
+      if (type) world[`${x},${y},${z}`] = type;
+      else delete world[`${x},${y},${z}`];
+    }
+
+    // Generate terrain
+    for (let x = -10; x <= 10; x++) {
+      for (let z = -10; z <= 10; z++) {
+        const h = Math.floor(Math.sin(x * 0.4) * 2 + Math.cos(z * 0.5) * 2) + 4;
+        for (let y = 0; y <= h; y++) {
+          if (y === h) setBlock(x, y, z, 'grass');
+          else if (y > h - 3) setBlock(x, y, z, 'dirt');
+          else setBlock(x, y, z, 'stone');
+        }
+      }
+    }
+
+    // ========== THREE.JS ==========
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.Fog(0x87CEEB, 25, 70);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 120);
+    camera.position.set(0, 7, 10);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.AmbientLight(0x8899bb));
+    const sun = new THREE.DirectionalLight(0xffeedd, 1.1);
+    sun.position.set(15, 25, 10);
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 1024;
+    sun.shadow.mapSize.height = 1024;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 80;
+    sun.shadow.camera.left = -20;
+    sun.shadow.camera.right = 20;
+    sun.shadow.camera.top = 20;
+    sun.shadow.camera.bottom = -20;
+    scene.add(sun);
+    scene.add(new THREE.HemisphereLight(0x87CEEB, 0x3d5a3d, 0.5));
+
+    // ========== TEXTURES ==========
+    function createTexture(baseColor) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 16; canvas.height = 16;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(0, 0, 16, 16);
+      for (let i = 0; i < 30; i++) {
+        const x = Math.floor(Math.random() * 16);
+        const y = Math.floor(Math.random() * 16);
+        ctx.fillStyle = `rgba(0,0,0,${Math.random()*0.15})`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      return tex;
+    }
+
+    const materials = {
+      grass: new THREE.MeshStandardMaterial({ map: createTexture('#7c9c4c'), roughness: 0.85 }),
+      dirt: new THREE.MeshStandardMaterial({ map: createTexture('#9b7653'), roughness: 0.9 }),
+      stone: new THREE.MeshStandardMaterial({ map: createTexture('#888888'), roughness: 0.7, metalness: 0.1 }),
+      wood: new THREE.MeshStandardMaterial({ map: createTexture('#bc9862'), roughness: 0.9 }),
+      leaf: new THREE.MeshStandardMaterial({ map: createTexture('#3d6b2e'), roughness: 0.8, transparent: true, opacity: 0.85 }),
+      sand: new THREE.MeshStandardMaterial({ map: createTexture('#f4e4b0'), roughness: 0.9 }),
+      brick: new THREE.MeshStandardMaterial({ map: createTexture('#b53c2c'), roughness: 0.8 }),
+      obsidian: new THREE.MeshStandardMaterial({ map: createTexture('#1a1a2e'), roughness: 0.3, metalness: 0.5 }),
+      gold: new THREE.MeshStandardMaterial({ map: createTexture('#f7c948'), roughness: 0.4, metalness: 0.7 }),
+    };
+
+    const blockGeo = new THREE.BoxGeometry(BLOCK, BLOCK, BLOCK);
+    const worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+
+    function rebuildAllChunks() {
+      while (worldGroup.children.length > 0) worldGroup.remove(worldGroup.children[0]);
+      for (const [key, type] of Object.entries(world)) {
+        const [x, y, z] = key.split(',').map(Number);
+        const mesh = new THREE.Mesh(blockGeo, materials[type] || materials.stone);
+        mesh.position.set(x, y, z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        worldGroup.add(mesh);
+      }
+    }
+    rebuildAllChunks();
+
+    // ========== PLAYER ==========
+    const player = {
+      position: new THREE.Vector3(0, 9, 0),
+      velocity: new THREE.Vector3(),
+      onGround: false,
+      yaw: 0, pitch: 0,
+      height: 1.6,
+      speed: 0.07,
+      jumpPower: 0.18,
+      gravity: -0.008,
+      selectedBlock: 'dirt'
+    };
+
+    function updateCamera() {
+      const dir = new THREE.Vector3(
+        -Math.sin(player.yaw) * Math.cos(player.pitch),
+        Math.sin(player.pitch),
+        -Math.cos(player.yaw) * Math.cos(player.pitch)
+      );
+      camera.position.copy(player.position.clone().add(new THREE.Vector3(0, player.height, 0)));
+      camera.lookAt(camera.position.clone().add(dir));
+    }
+
+    function checkCollision(pos) {
+      const foot = pos.clone().add(new THREE.Vector3(0, 0.05, 0));
+      const head = pos.clone().add(new THREE.Vector3(0, player.height - 0.1, 0));
+      const minX = Math.floor(foot.x - 0.25);
+      const maxX = Math.floor(foot.x + 0.25);
+      const minY = Math.floor(foot.y);
+      const maxY = Math.floor(head.y);
+      const minZ = Math.floor(foot.z - 0.25);
+      const maxZ = Math.floor(foot.z + 0.25);
+      for (let x = minX; x <= maxX; x++)
+        for (let y = minY; y <= maxY; y++)
+          for (let z = minZ; z <= maxZ; z++)
+            if (getBlock(x, y, z)) return true;
+      return false;
+    }
+
+    function applyPhysics() {
+      player.velocity.y += player.gravity;
+      const newPos = player.position.clone().add(player.velocity);
+      const testX = new THREE.Vector3(newPos.x, player.position.y, player.position.z);
+      if (!checkCollision(testX)) player.position.x = newPos.x;
+      const testZ = new THREE.Vector3(player.position.x, player.position.y, newPos.z);
+      if (!checkCollision(testZ)) player.position.z = newPos.z;
+      const testY = new THREE.Vector3(player.position.x, newPos.y, player.position.z);
+      if (!checkCollision(testY)) {
+        player.position.y = newPos.y;
+        player.onGround = false;
+      } else {
+        player.velocity.y = 0;
+        player.onGround = true;
+      }
+      updateCamera();
+    }
+
+    // ========== INPUT ==========
+    const keys = {};
+    window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+    window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; e.preventDefault(); });
+
+    document.addEventListener('mousemove', e => {
+      if (document.pointerLockElement === renderer.domElement) {
+        player.yaw -= e.movementX * 0.002;
+        player.pitch -= e.movementY * 0.002;
+        player.pitch = Math.max(-Math.PI / 2.5, Math.min(Math.PI / 2.5, player.pitch));
+      }
+    });
+    renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+
+    // Joystick move (dikoreksi arah)
+    const joystickMove = document.getElementById('joystickMove');
+    const moveThumb = document.getElementById('moveThumb');
+    let moveInput = { x: 0, z: 0 };
+    joystickMove.addEventListener('touchstart', e => { e.preventDefault(); initAudio(); updateMoveJoystick(e.touches[0]); });
+    joystickMove.addEventListener('touchmove', e => { e.preventDefault(); updateMoveJoystick(e.touches[0]); });
+    joystickMove.addEventListener('touchend', e => {
+      e.preventDefault();
+      moveInput = { x: 0, z: 0 };
+      moveThumb.style.left = '26.5px'; moveThumb.style.top = '26.5px';
+    });
+    function updateMoveJoystick(touch) {
+      const rect = joystickMove.getBoundingClientRect();
+      const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+      let dx = touch.clientX - cx, dy = touch.clientY - cy;
+      const maxR = 38;
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      if (dist > maxR) { dx = dx/dist*maxR; dy = dy/dist*maxR; }
+      moveThumb.style.left = (26.5 + dx) + 'px';
+      moveThumb.style.top = (26.5 + dy) + 'px';
+      // arah: dorong ke atas (dy negatif) -> maju (z negatif di world, tapi kita ingin moveInput.z positif untuk maju)
+      moveInput.x = dx / maxR;
+      moveInput.z = -dy / maxR; // dibalik agar maju
+    }
+
+    // Touch look (geser di area kosong)
+    let touchLookActive = false, lastLookX = 0, lastLookY = 0;
+    renderer.domElement.addEventListener('touchstart', e => {
+      if (e.target.closest('.ui-btn') || e.target.closest('#hotbar')) return;
+      if (e.touches.length === 1) {
+        e.preventDefault();
+        touchLookActive = true;
+        lastLookX = e.touches[0].clientX;
+        lastLookY = e.touches[0].clientY;
+        initAudio();
+      }
+    }, { passive: false });
+    renderer.domElement.addEventListener('touchmove', e => {
+      if (!touchLookActive) return;
+      e.preventDefault();
+      const dx = e.touches[0].clientX - lastLookX, dy = e.touches[0].clientY - lastLookY;
+      player.yaw -= dx * 0.005;
+      player.pitch -= dy * 0.005;
+      player.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.pitch));
+      lastLookX = e.touches[0].clientX; lastLookY = e.touches[0].clientY;
+    }, { passive: false });
+    renderer.domElement.addEventListener('touchend', () => { touchLookActive = false; });
+
+    // Jump button
+    document.getElementById('jump-btn').addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (player.onGround) {
+        player.velocity.y = player.jumpPower;
+        player.onGround = false;
+        playSound(300, 0.15);
+      }
+    });
+
+    // Hotbar selection
+    document.querySelectorAll('.slot').forEach(slot => {
+      slot.addEventListener('touchstart', e => {
+        e.preventDefault();
+        document.querySelector('.slot.selected')?.classList.remove('selected');
+        slot.classList.add('selected');
+        player.selectedBlock = slot.dataset.block;
+      });
+    });
+
+    // Break & Place buttons
+    function getTargetBlock() {
+      const dir = new THREE.Vector3(-Math.sin(player.yaw)*Math.cos(player.pitch), Math.sin(player.pitch), -Math.cos(player.yaw)*Math.cos(player.pitch));
+      const origin = camera.position.clone();
+      for (let i = 0; i < 10; i++) {
+        const point = origin.clone().add(dir.clone().multiplyScalar(i*0.5));
+        const bx = Math.round(point.x), by = Math.round(point.y), bz = Math.round(point.z);
+        if (getBlock(bx, by, bz)) return { pos: new THREE.Vector3(bx, by, bz) };
+      }
+      return null;
+    }
+
+    function breakBlock() {
+      const target = getTargetBlock();
+      if (target) {
+        const { x, y, z } = target.pos;
+        if (getBlock(x, y, z)) {
+          setBlock(x, y, z, null);
+          rebuildAllChunks();
+          playSound(200, 0.1);
+        }
+      }
+    }
+
+    function placeBlock() {
+      const dir = new THREE.Vector3(-Math.sin(player.yaw)*Math.cos(player.pitch), Math.sin(player.pitch), -Math.cos(player.yaw)*Math.cos(player.pitch));
+      const origin = camera.position.clone();
+      for (let i = 0; i < 10; i++) {
+        const point = origin.clone().add(dir.clone().multiplyScalar(i*0.5));
+        const bx = Math.round(point.x), by = Math.round(point.y), bz = Math.round(point.z);
+        if (getBlock(bx, by, bz)) {
+          const prev = point.clone().add(dir.clone().multiplyScalar(-0.5));
+          const px = Math.round(prev.x), py = Math.round(prev.y), pz = Math.round(prev.z);
+          if (!getBlock(px, py, pz)) {
+            const playerFoot = new THREE.Vector3(Math.round(player.position.x), Math.round(player.position.y), Math.round(player.position.z));
+            const playerHead = new THREE.Vector3(Math.round(player.position.x), Math.round(player.position.y+1), Math.round(player.position.z));
+            if (!playerFoot.equals(new THREE.Vector3(px,py,pz)) && !playerHead.equals(new THREE.Vector3(px,py,pz))) {
+              setBlock(px, py, pz, player.selectedBlock);
+              rebuildAllChunks();
+              playSound(400, 0.1);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    document.getElementById('break-btn').addEventListener('touchstart', e => { e.preventDefault(); breakBlock(); });
+    document.getElementById('place-btn').addEventListener('touchstart', e => { e.preventDefault(); placeBlock(); });
+
+    // Mouse actions
+    window.addEventListener('mousedown', e => {
+      if (e.button === 0) breakBlock();
+      if (e.button === 2) placeBlock();
+    });
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+    // ========== GAME LOOP ==========
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const moveDir = new THREE.Vector3();
+      if (keys['w'] || keys['arrowup']) moveDir.z += 1;
+      if (keys['s'] || keys['arrowdown']) moveDir.z -= 1;
+      if (keys['a'] || keys['arrowleft']) moveDir.x -= 1;
+      if (keys['d'] || keys['arrowright']) moveDir.x += 1;
+      moveDir.x += moveInput.x;
+      moveDir.z += moveInput.z;
+
+      if (moveDir.length() > 0) {
+        moveDir.normalize();
+        const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+        const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+        const vel = new THREE.Vector3(0,0,0)
+          .add(forward.clone().multiplyScalar(moveDir.z))
+          .add(right.clone().multiplyScalar(moveDir.x))
+          .normalize().multiplyScalar(player.speed);
+        player.position.x += vel.x;
+        player.position.z += vel.z;
+        if (checkCollision(player.position)) {
+          player.position.x -= vel.x;
+          player.position.z -= vel.z;
+        }
+      }
+
+      if ((keys[' '] || keys['space']) && player.onGround) {
+        player.velocity.y = player.jumpPower;
+        player.onGround = false;
+        playSound(300, 0.15);
+      }
+
+      applyPhysics();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
