@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mini Minecraft</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: #000; overflow: hidden;
+      font-family: 'Segoe UI', sans-serif;
+      user-select: none; -webkit-user-select: none;
+      position: fixed; height: 100%; width: 100%;
+      touch-action: manipulation;
+    }
+    canvas { display: block; }
+
+    /* Crosshair */
+    #crosshair {
+      position: absolute; top: 50%; left: 50%;
+      width: 20px; height: 20px; transform: translate(-50%,-50%);
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255,255,255,0.9);
+    }
+    #crosshair::before { width: 2px; height: 100%; left: 9px; }
+    #crosshair::after { height: 2px; width: 100%; top: 9px; }
+
+    /* Joystick kiri (gerak) */
+    .joystick-move {
+      position: absolute; bottom: 40px; left: 30px;
+      width: 90px; height: 90px; background: rgba(255,255,255,0.1);
+      border: 2px solid rgba(255,255,255,0.3); border-radius: 50%;
+      pointer-events: auto; touch-action: none;
+    }
+    .joystick-move .thumb {
+      position: absolute; width: 40px; height: 40px;
+      background: rgba(255,255,255,0.7); border-radius: 50%;
+      left: 25px; top: 25px;
+    }
+
+    /* Joystick kanan (lihat) */
+    .joystick-look {
+      position: absolute; bottom: 40px; right: 30px;
+      width: 90px; height: 90px; background: rgba(255,255,255,0.1);
+      border: 2px dashed rgba(255,255,255,0.3); border-radius: 50%;
+      pointer-events: auto; touch-action: none;
+    }
+    .joystick-look .thumb {
+      position: absolute; width: 40px; height: 40px;
+      background: rgba(255,255,255,0.7); border-radius: 50%;
+      left: 25px; top: 25px;
+    }
+
+    /* Tombol aksi */
+    #action-buttons {
+      position: absolute; bottom: 50px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 20px; pointer-events: auto;
+    }
+    .action-btn {
+      width: 60px; height: 60px; border-radius: 50%;
+      background: rgba(0,0,0,0.6); border: 2px solid white;
+      color: white; font-size: 28px; display: flex;
+      align-items: center; justify-content: center;
+      backdrop-filter: blur(4px);
+    }
+    .action-btn:active { background: rgba(255,255,255,0.4); }
+
+    /* Block indicator */
+    #block-indicator {
+      position: absolute; top: 20px; left: 20px;
+      color: white; background: rgba(0,0,0,0.5);
+      padding: 6px 12px; border-radius: 10px;
+      font-size: 13px; pointer-events: none;
+    }
+
+    #minimap {
+      position: absolute; top: 20px; right: 20px;
+      width: 70px; height: 70px; border: 2px solid gold; border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div id="crosshair"></div>
+  <div class="joystick-move" id="joystickMove">
+    <div class="thumb" id="moveThumb"></div>
+  </div>
+  <div class="joystick-look" id="joystickLook">
+    <div class="thumb" id="lookThumb"></div>
+  </div>
+  <div id="action-buttons">
+    <div class="action-btn" id="btnBreak">⛏️</div>
+    <div class="action-btn" id="btnPlace">🧱</div>
+  </div>
+  <div id="block-indicator">Menunjuk: udara</div>
+  <canvas id="minimap" width="70" height="70"></canvas>
+
+  <script type="importmap">
+    { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ========== WORLD STATE ==========
+    const world = {}; // key "x,y,z" -> type ('grass','dirt','stone','wood','leaf')
+    const CHUNK_SIZE = 16;
+    const BLOCK_SIZE = 1;
+
+    function getBlock(x, y, z) {
+      return world[`${x},${y},${z}`] || null;
+    }
+    function setBlock(x, y, z, type) {
+      if (type) world[`${x},${y},${z}`] = type;
+      else delete world[`${x},${y},${z}`];
+    }
+
+    // Generate simple flat terrain with hills and trees
+    for (let x = -8; x <= 8; x++) {
+      for (let z = -8; z <= 8; z++) {
+        const h = Math.floor(Math.sin(x*0.5)*2 + Math.cos(z*0.5)*2) + 4;
+        for (let y = 0; y <= h; y++) {
+          if (y === h) setBlock(x, y, z, 'grass');
+          else if (y > h-3) setBlock(x, y, z, 'dirt');
+          else setBlock(x, y, z, 'stone');
+        }
+        // Tree
+        if (Math.random() < 0.15 && h > 3) {
+          for (let ty = h+1; ty <= h+3; ty++) setBlock(x, ty, z, 'wood');
+          for (let dx = -2; dx <= 2; dx++) {
+            for (let dz = -2; dz <= 2; dz++) {
+              for (let dy = h+3; dy <= h+4; dy++) {
+                if (Math.abs(dx) <= 1 || Math.abs(dz) <= 1 || dy === h+4) {
+                  if (!(dx===0 && dz===0 && dy===h+4)) setBlock(x+dx, dy, z+dz, 'leaf');
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // ========== THREE.JS SETUP ==========
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87CEEB);
+    scene.fog = new THREE.Fog(0x87CEEB, 30, 60);
+
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+    camera.position.set(0, 6, 8);
+    camera.lookAt(0,4,0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    scene.add(new THREE.AmbientLight(0x8899aa));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(10, 20, 5);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 512;
+    dirLight.shadow.mapSize.height = 512;
+    scene.add(dirLight);
+
+    // ========== BUILD MESH ==========
+    const materials = {
+      grass: new THREE.MeshStandardMaterial({ color: 0x7c9c4c }),
+      dirt: new THREE.MeshStandardMaterial({ color: 0x9b7653 }),
+      stone: new THREE.MeshStandardMaterial({ color: 0x888888 }),
+      wood: new THREE.MeshStandardMaterial({ color: 0xbc9862 }),
+      leaf: new THREE.MeshStandardMaterial({ color: 0x3d6b2e, transparent: true, opacity: 0.8 }),
+    };
+
+    const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+    const worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+
+    function rebuildAllChunks() {
+      while(worldGroup.children.length > 0) worldGroup.remove(worldGroup.children[0]);
+      for (const [key, type] of Object.entries(world)) {
+        const [x, y, z] = key.split(',').map(Number);
+        const mesh = new THREE.Mesh(blockGeometry, materials[type] || materials.stone);
+        mesh.position.set(x, y, z);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.userData = { x, y, z, type };
+        worldGroup.add(mesh);
+      }
+    }
+    rebuildAllChunks();
+
+    // ========== PLAYER ==========
+    const player = {
+      position: new THREE.Vector3(0, 8, 0),
+      velocity: new THREE.Vector3(),
+      onGround: false,
+      yaw: 0, pitch: 0,
+      height: 1.6,
+      speed: 0.08,
+      jumpPower: 0.2,
+      gravity: -0.01,
+    };
+
+    // Camera is our eyes
+    function updateCamera() {
+      const dir = new THREE.Vector3(
+        -Math.sin(player.yaw) * Math.cos(player.pitch),
+        Math.sin(player.pitch),
+        -Math.cos(player.yaw) * Math.cos(player.pitch)
+      );
+      camera.position.copy(player.position.clone().add(new THREE.Vector3(0, player.height, 0)));
+      camera.lookAt(camera.position.clone().add(dir));
+    }
+
+    // ========== COLLISION & PHYSICS ==========
+    function checkCollision(pos) {
+      const foot = pos.clone().add(new THREE.Vector3(0, 0.1, 0));
+      const head = pos.clone().add(new THREE.Vector3(0, player.height, 0));
+      const minX = Math.floor(foot.x - 0.3);
+      const maxX = Math.floor(foot.x + 0.3);
+      const minY = Math.floor(foot.y);
+      const maxY = Math.floor(head.y);
+      const minZ = Math.floor(foot.z - 0.3);
+      const maxZ = Math.floor(foot.z + 0.3);
+      for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+          for (let z = minZ; z <= maxZ; z++) {
+            if (getBlock(x, y, z)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function applyPhysics() {
+      player.velocity.y += player.gravity;
+      const newPos = player.position.clone().add(player.velocity);
+      // Separate axis collision
+      const testX = new THREE.Vector3(newPos.x, player.position.y, player.position.z);
+      if (!checkCollision(testX)) player.position.x = newPos.x;
+      const testZ = new THREE.Vector3(player.position.x, player.position.y, newPos.z);
+      if (!checkCollision(testZ)) player.position.z = newPos.z;
+      const testY = new THREE.Vector3(player.position.x, newPos.y, player.position.z);
+      if (!checkCollision(testY)) {
+        player.position.y = newPos.y;
+        player.onGround = false;
+      } else {
+        player.velocity.y = 0;
+        player.onGround = true;
+      }
+      updateCamera();
+    }
+
+    // ========== INPUT ==========
+    const keys = {};
+    window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+    window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; e.preventDefault(); });
+
+    // Mouse look (PC)
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === renderer.domElement) {
+        player.yaw -= e.movementX * 0.002;
+        player.pitch -= e.movementY * 0.002;
+        player.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.pitch));
+      }
+    });
+    renderer.domElement.addEventListener('click', () => {
+      renderer.domElement.requestPointerLock();
+    });
+
+    // Joystick move (kiri)
+    const joystickMove = document.getElementById('joystickMove');
+    const moveThumb = document.getElementById('moveThumb');
+    let moveInput = { x: 0, z: 0 };
+    joystickMove.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      updateMoveJoystick(touch);
+    });
+    joystickMove.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      updateMoveJoystick(e.touches[0]);
+    });
+    joystickMove.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      moveInput = { x: 0, z: 0 };
+      moveThumb.style.left = '25px'; moveThumb.style.top = '25px';
+    });
+    function updateMoveJoystick(touch) {
+      const rect = joystickMove.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      let dx = touch.clientX - cx;
+      let dy = touch.clientY - cy;
+      const maxR = 35;
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      if (dist > maxR) { dx = dx/dist*maxR; dy = dy/dist*maxR; }
+      moveThumb.style.left = (25 + dx) + 'px';
+      moveThumb.style.top = (25 + dy) + 'px';
+      moveInput = { x: dx/maxR, z: dy/maxR };
+    }
+
+    // Joystick look (kanan)
+    const joystickLook = document.getElementById('joystickLook');
+    const lookThumb = document.getElementById('lookThumb');
+    let lookDelta = { x: 0, y: 0 };
+    joystickLook.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      updateLookJoystick(touch);
+    });
+    joystickLook.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      updateLookJoystick(e.touches[0]);
+    });
+    joystickLook.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      lookDelta = { x: 0, y: 0 };
+      lookThumb.style.left = '25px'; lookThumb.style.top = '25px';
+    });
+    function updateLookJoystick(touch) {
+      const rect = joystickLook.getBoundingClientRect();
+      const cx = rect.left + rect.width/2;
+      const cy = rect.top + rect.height/2;
+      let dx = touch.clientX - cx;
+      let dy = touch.clientY - cy;
+      const maxR = 35;
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      if (dist > maxR) { dx = dx/dist*maxR; dy = dy/dist*maxR; }
+      lookThumb.style.left = (25 + dx) + 'px';
+      lookThumb.style.top = (25 + dy) + 'px';
+      lookDelta = { x: dx/maxR * 0.05, y: dy/maxR * 0.05 };
+    }
+
+    // Tombol aksi
+    document.getElementById('btnBreak').addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      breakBlock();
+    });
+    document.getElementById('btnPlace').addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      placeBlock();
+    });
+
+    // Mouse click actions
+    window.addEventListener('mousedown', (e) => {
+      if (e.button === 0) breakBlock();
+      if (e.button === 2) placeBlock();
+    });
+    window.addEventListener('contextmenu', e => e.preventDefault());
+
+    // ========== RAYCAST FOR BLOCK TARGET ==========
+    function getTargetBlock() {
+      const dir = new THREE.Vector3(
+        -Math.sin(player.yaw) * Math.cos(player.pitch),
+        Math.sin(player.pitch),
+        -Math.cos(player.yaw) * Math.cos(player.pitch)
+      );
+      const origin = camera.position.clone();
+      for (let i = 0; i < 8; i++) {
+        const point = origin.clone().add(dir.clone().multiplyScalar(i * 0.5));
+        const blockX = Math.round(point.x);
+        const blockY = Math.round(point.y);
+        const blockZ = Math.round(point.z);
+        if (getBlock(blockX, blockY, blockZ)) {
+          return { pos: new THREE.Vector3(blockX, blockY, blockZ), normal: null };
+        }
+      }
+      return null;
+    }
+
+    function breakBlock() {
+      const target = getTargetBlock();
+      if (target) {
+        const { x, y, z } = target.pos;
+        if (getBlock(x, y, z)) {
+          setBlock(x, y, z, null);
+          rebuildAllChunks();
+        }
+      }
+    }
+
+    function placeBlock() {
+      const dir = new THREE.Vector3(
+        -Math.sin(player.yaw) * Math.cos(player.pitch),
+        Math.sin(player.pitch),
+        -Math.cos(player.yaw) * Math.cos(player.pitch)
+      );
+      const origin = camera.position.clone();
+      // Raycast untuk temukan blok yang ada, lalu tempatkan di depannya
+      for (let i = 0; i < 8; i++) {
+        const point = origin.clone().add(dir.clone().multiplyScalar(i * 0.5));
+        const bx = Math.round(point.x), by = Math.round(point.y), bz = Math.round(point.z);
+        if (getBlock(bx, by, bz)) {
+          // Mundur satu langkah
+          const placePos = point.clone().add(dir.clone().multiplyScalar(-0.5));
+          const px = Math.round(placePos.x), py = Math.round(placePos.y), pz = Math.round(placePos.z);
+          if (!getBlock(px, py, pz) && !player.position.clone().add(new THREE.Vector3(0,0.5,0)).equals(new THREE.Vector3(px,py,pz))) {
+            setBlock(px, py, pz, 'dirt');
+            rebuildAllChunks();
+          }
+          break;
+        }
+      }
+    }
+
+    // ========== GAME LOOP ==========
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Movement
+      const moveDir = new THREE.Vector3();
+      if (keys['w'] || keys['arrowup']) moveDir.z -= 1;
+      if (keys['s'] || keys['arrowdown']) moveDir.z += 1;
+      if (keys['a'] || keys['arrowleft']) moveDir.x -= 1;
+      if (keys['d'] || keys['arrowright']) moveDir.x += 1;
+      // Joystick input
+      moveDir.x += moveInput.x;
+      moveDir.z += moveInput.z;
+      
+      if (moveDir.length() > 0) {
+        moveDir.normalize();
+        const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+        const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+        const vel = new THREE.Vector3(0,0,0)
+          .add(forward.clone().multiplyScalar(moveDir.z))
+          .add(right.clone().multiplyScalar(moveDir.x))
+          .normalize().multiplyScalar(player.speed);
+        player.position.x += vel.x;
+        player.position.z += vel.z;
+        if (checkCollision(player.position)) {
+          player.position.x -= vel.x;
+          player.position.z -= vel.z;
+        }
+      }
+
+      // Jump
+      if ((keys[' '] || keys['space']) && player.onGround) {
+        player.velocity.y = player.jumpPower;
+        player.onGround = false;
+      }
+
+      // Look from joystick
+      player.yaw -= lookDelta.x;
+      player.pitch -= lookDelta.y;
+      player.pitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, player.pitch));
+
+      applyPhysics();
+      updateCamera();
+
+      // Block indicator
+      const target = getTargetBlock();
+      document.getElementById('block-indicator').textContent = target 
+        ? `Menunjuk: ${getBlock(target.pos.x, target.pos.y, target.pos.z)}` 
+        : 'Menunjuk: udara';
+
+      // Minimap
+      const mm = document.getElementById('minimap');
+      const ctx = mm.getContext('2d');
+      ctx.clearRect(0,0,70,70);
+      ctx.fillStyle = '#87CEEB'; ctx.fillRect(0,0,70,70);
+      const px = (player.position.x + 8) / 16 * 70;
+      const py = (player.position.z + 8) / 16 * 70;
+      ctx.fillStyle = 'red'; ctx.beginPath(); ctx.arc(px, py, 2, 0, 2*Math.PI); ctx.fill();
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+  </html>
