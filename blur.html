@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Peace Sign Blur</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      height: 100vh;
+      width: 100vw;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      transition: filter 0.25s ease;
+    }
+    video.blur {
+      filter: blur(14px);
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils@0.6/control_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js"></script>
+
+  <script>
+    const video = document.getElementById('video');
+
+    function isPeaceSign(landmarks) {
+      const indexTip = landmarks[8];
+      const indexPip = landmarks[6];
+      const middleTip = landmarks[12];
+      const middlePip = landmarks[10];
+      const ringTip = landmarks[16];
+      const ringPip = landmarks[14];
+      const pinkyTip = landmarks[20];
+      const pinkyPip = landmarks[18];
+
+      const indexUp = indexTip.y < indexPip.y;
+      const middleUp = middleTip.y < middlePip.y;
+      const ringDown = ringTip.y > ringPip.y;
+      const pinkyDown = pinkyTip.y > pinkyPip.y;
+
+      return indexUp && middleUp && ringDown && pinkyDown;
+    }
+
+    function onResults(results) {
+      let shouldBlur = false;
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        for (const landmarks of results.multiHandLandmarks) {
+          if (isPeaceSign(landmarks)) {
+            shouldBlur = true;
+            break;
+          }
+        }
+      }
+
+      if (shouldBlur) {
+        video.classList.add('blur');
+      } else {
+        video.classList.remove('blur');
+      }
+    }
+
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/${file}`
+    });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.5
+    });
+    hands.onResults(onResults);
+
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480,
+      facingMode: 'user'
+    });
+    camera.start();
+
+    camera.start().catch(() => {
+      alert('Gagal mengakses kamera. Pastikan kamu membuka halaman melalui HTTPS atau localhost.');
+    });
+  </script>
+</body>
+                                                                                             </html>
